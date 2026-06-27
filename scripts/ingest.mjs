@@ -362,7 +362,7 @@ async function existingSet(table, col) {
 // batch to have identical keys, and rejects unknown columns — so we project
 // each row onto exactly these columns (null-filling) before sending.
 const COLS = {
-  checkins: ["name", "status", "city", "latitude", "longitude", "message", "phone_private", "photo_url", "place_name", "found_at", "source", "source_url", "external_id", "dedup_key"],
+  checkins: ["name", "status", "city", "latitude", "longitude", "message", "phone_private", "cedula_private", "cedula_hash", "photo_url", "place_name", "found_at", "source", "source_url", "external_id", "dedup_key"],
   damaged_reports: ["place_name", "description", "severity", "city", "latitude", "longitude", "photo_url", "source", "source_url", "external_id", "dedup_key"],
   help_requests: ["category", "description", "urgency", "city", "latitude", "longitude", "place_name", "source", "source_url", "external_id"],
 };
