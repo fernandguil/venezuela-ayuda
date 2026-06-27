@@ -34,6 +34,7 @@ export const LIMITS = {
   description: 800,
   phone: 30,
   availability: 200,
+  cedula: 15,
   place_name: 120,
   source_url: 500,
   photo_url: 500,
