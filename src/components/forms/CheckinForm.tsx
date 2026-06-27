@@ -1,11 +1,13 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useActionState, useState } from "react";
 import { useTranslations } from "next-intl";
 import { submitCheckin, type ActionState } from "@/app/actions";
 import { CHECKIN_STATUSES, LIMITS, type CheckinStatus } from "@/lib/constants";
 import { Label, TextInput, TextArea, FieldError, Honeypot } from "@/components/Field";
+import CedulaField from "@/components/CedulaField";
 import LocationPicker from "@/components/LocationPicker";
 import PhotoInput from "@/components/PhotoInput";
 import SubmitButton from "@/components/SubmitButton";
@@ -74,6 +76,17 @@ export default function CheckinForm({
       {state.error && (
         <p className="rounded-xl bg-red-50 px-4 py-3 font-medium text-red-700" role="alert">
           {state.error}
+          {state.existingPersonId && (
+            <>
+              {" "}
+              <Link
+                href={`/persona/${state.existingPersonId}`}
+                className="font-semibold underline"
+              >
+                {tc("viewExistingReport")}
+              </Link>
+            </>
+          )}
         </p>
       )}
 
@@ -180,6 +193,8 @@ export default function CheckinForm({
         />
         <p className="mt-1 text-sm text-slate-500">{tc("phoneNote")}</p>
       </div>
+
+      <CedulaField error={state.fieldErrors?.cedula} />
 
       <div>
         <PhotoInput

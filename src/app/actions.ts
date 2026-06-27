@@ -27,12 +27,24 @@ import { VA_SOURCE } from "@/lib/canonical.mjs";
 import { ingestArgs, patchArgs, buildCenterRow } from "@/lib/internalWrite.mjs";
 import { frIndexPerson } from "@/lib/fr";
 import { logError, logWarn } from "@/lib/log.mjs";
-import type { Sighting, RequestResponse } from "@/lib/types";
+import type { Sighting, RequestResponse, PublicCheckin } from "@/lib/types";
+import { parseCedulaForm } from "@/lib/cedula";
+import { cedulaHash, getCedulaSecret } from "@/lib/cedula.server";
+import { getCheckin } from "@/lib/data";
 
 export type ActionState = {
   ok: boolean;
   error?: string;
   fieldErrors?: Record<string, string>;
+  existingPersonId?: string;
+};
+
+export type CedulaSearchState = {
+  ok: boolean;
+  error?: string;
+  fieldErrors?: Record<string, string>;
+  result?: PublicCheckin | null;
+  searched?: boolean;
 };
 
 // Shared guards -------------------------------------------------------------
@@ -108,7 +120,25 @@ export async function submitCheckin(
   if (!isValidStatus(status)) fieldErrors.status = "Selecciona un estado.";
   if (status !== "SAFE" && !coords)
     fieldErrors.location = "Indica la ubicación en el mapa.";
+
+  const cedulaParsed = parseCedulaForm(form.get("cedula_prefix"), form.get("cedula_number"));
+  if (cedulaParsed.invalid) fieldErrors.cedula = "Revisa la cédula (solo números, prefijo V o E).";
+
   if (Object.keys(fieldErrors).length) return { ok: false, fieldErrors };
+
+  let cedulaPrivate: string | null = null;
+  let cedulaHashVal: string | null = null;
+  if (cedulaParsed.normalized) {
+    const secret = getCedulaSecret();
+    if (!secret) {
+      return {
+        ok: false,
+        error: "El servicio no está disponible en este momento. Intenta de nuevo más tarde.",
+      };
+    }
+    cedulaPrivate = cedulaParsed.normalized;
+    cedulaHashVal = cedulaHash(cedulaParsed.normalized, secret);
+  }
 
   // Generate the id ourselves so we don't need to read the row back. Reading it
   // back would require a SELECT policy on `checkins`, which we deliberately omit
@@ -117,6 +147,24 @@ export async function submitCheckin(
   const manageToken = crypto.randomUUID();
   try {
     const supabase = getServerSupabase();
+
+    if (cedulaHashVal) {
+      const { data: existing } = await supabase
+        .from("checkins")
+        .select("id")
+        .eq("cedula_hash", cedulaHashVal)
+        .eq("hidden", false)
+        .limit(1)
+        .maybeSingle();
+      if (existing?.id) {
+        return {
+          ok: false,
+          error: "Ya hay un reporte para esta cédula.",
+          existingPersonId: existing.id,
+        };
+      }
+    }
+
     const photoUrl = await uploadCheckinPhoto(supabase, id, form.get("photo_data"));
     // Escritura interna por la MISMA RPC del API externo (audita CREATE + atribuye
     // a venezuela-ayuda.com). El id lo generamos acá (lo necesita el path de la
@@ -138,6 +186,8 @@ export async function submitCheckin(
           place_name: cleanOptional(form.get("place_name"), LIMITS.place_name),
           photo_url: photoUrl,
           manage_token: manageToken,
+          cedula_private: cedulaPrivate,
+          cedula_hash: cedulaHashVal,
         },
       ])
     );
@@ -168,6 +218,60 @@ export async function submitCheckin(
   revalidatePath("/buscar");
   revalidatePath("/mapa");
   redirect(`/persona/${id}?nuevo=1&t=${manageToken}`);
+}
+
+// Exact cédula lookup — POST only; never put the number in URLs or logs.
+export async function searchCheckinByCedula(
+  _prev: CedulaSearchState,
+  form: FormData,
+): Promise<CedulaSearchState> {
+  if (!isSupabaseConfigured()) {
+    return { ok: false, error: "El servicio no está disponible en este momento." };
+  }
+  if (isBot(form)) return { ok: true, searched: true, result: null };
+
+  const limited = await rateLimit(await clientKey("cedula-search"), { limit: 5, windowSec: 60 });
+  if (!limited.ok) {
+    return {
+      ok: false,
+      error: `Demasiados intentos. Espera ${limited.retryAfterSec}s e intenta de nuevo.`,
+    };
+  }
+
+  const parsed = parseCedulaForm(form.get("cedula_prefix"), form.get("cedula_number"));
+  if (parsed.invalid) {
+    return { ok: false, fieldErrors: { cedula: "Revisa la cédula (solo números, prefijo V o E)." } };
+  }
+  if (!parsed.normalized) {
+    return { ok: false, fieldErrors: { cedula: "Escribe una cédula para buscar." } };
+  }
+
+  const secret = getCedulaSecret();
+  if (!secret) {
+    return { ok: false, error: "El servicio no está disponible en este momento." };
+  }
+
+  try {
+    const supabase = getServerSupabase();
+    const hash = cedulaHash(parsed.normalized, secret);
+    const { data: row } = await supabase
+      .from("checkins")
+      .select("id")
+      .eq("cedula_hash", hash)
+      .eq("hidden", false)
+      .limit(1)
+      .maybeSingle();
+
+    if (!row?.id) {
+      return { ok: true, searched: true, result: null };
+    }
+
+    const pub = await getCheckin(row.id);
+    return { ok: true, searched: true, result: pub };
+  } catch (err) {
+    logError("cedula_search_failed", err, { scope: "actions.searchCheckinByCedula" });
+    return { ok: false, error: "No pudimos completar la búsqueda. Intenta de nuevo." };
+  }
 }
 
 // 3. Help request -----------------------------------------------------------

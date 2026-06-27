@@ -187,6 +187,8 @@ export type Database = {
       }
       checkins: {
         Row: {
+          cedula_hash: string | null
+          cedula_private: string | null
           city: string | null
           created_at: string
           dedup_key: string | null
@@ -208,6 +210,8 @@ export type Database = {
           status: Database["public"]["Enums"]["checkin_status"]
         }
         Insert: {
+          cedula_hash?: string | null
+          cedula_private?: string | null
           city?: string | null
           created_at?: string
           dedup_key?: string | null
@@ -229,6 +233,8 @@ export type Database = {
           status?: Database["public"]["Enums"]["checkin_status"]
         }
         Update: {
+          cedula_hash?: string | null
+          cedula_private?: string | null
           city?: string | null
           created_at?: string
           dedup_key?: string | null
