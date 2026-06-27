@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import PageShell from "@/components/PageShell";
 import PersonResultCard from "@/components/PersonResultCard";
+import CedulaSearchForm from "@/components/CedulaSearchForm";
 import SourcesNote from "@/components/SourcesNote";
 import {
   searchCheckins,
@@ -82,6 +83,8 @@ export default async function Page({
           {t("searchButton")}
         </button>
       </form>
+
+      <CedulaSearchForm />
 
       <Link
         href="/galeria"

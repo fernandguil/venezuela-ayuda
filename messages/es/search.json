@@ -28,5 +28,12 @@
     "moreSources": "+{count, plural, one {# fuente} other {# fuentes}} más"
   },
   "sourcesIntro": "🌐 Incluye datos de esfuerzos ciudadanos aliados —",
-  "sourcesOutro": "y más — integrados y atribuidos automáticamente cada hora. La información externa se muestra como «sin verificar»."
+  "sourcesOutro": "y más — integrados y atribuidos automáticamente cada hora. La información externa se muestra como «sin verificar».",
+  "cedula": {
+    "heading": "Buscar por cédula",
+    "intro": "Coincidencia exacta. El número no se muestra en los resultados.",
+    "searchButton": "Buscar por cédula",
+    "searching": "Buscando…",
+    "none": "No encontramos un reporte con esa cédula."
+  }
 }

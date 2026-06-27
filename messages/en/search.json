@@ -28,5 +28,12 @@
     "moreSources": "+{count, plural, one {# more source} other {# more sources}}"
   },
   "sourcesIntro": "🌐 Includes data from allied citizen efforts —",
-  "sourcesOutro": "and more — integrated and attributed automatically every hour. External information is shown as \"unverified\"."
+  "sourcesOutro": "and more — integrated and attributed automatically every hour. External information is shown as \"unverified\".",
+  "cedula": {
+    "heading": "Search by national ID",
+    "intro": "Exact match only. The number is never shown in results.",
+    "searchButton": "Search by ID",
+    "searching": "Searching…",
+    "none": "We didn't find a report with that ID."
+  }
 }
