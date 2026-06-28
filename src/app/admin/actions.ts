@@ -625,20 +625,30 @@ export async function addChildCustodyEvent(_prev: Result, form: FormData): Promi
     source: VA_SOURCE,
     recorded_by: email,
   });
-  if (error) return { ok: false, error: "No se pudo registrar el evento." };
+  if (error) {
+    logError("admin_child_custody_insert_failed", error, { scope: "admin.addChildCustodyEvent", childId });
+    return { ok: false, error: "No se pudo registrar el evento." };
+  }
 
   const patch: Database["public"]["Tables"]["unaccompanied_children"]["Update"] = {
     last_custody_at: new Date().toISOString(),
   };
   if (status) patch.status = status;
-  await svc.from("unaccompanied_children").update(patch).eq("id", childId);
+  const { error: updateErr } = await svc
+    .from("unaccompanied_children")
+    .update(patch)
+    .eq("id", childId);
+  if (updateErr) {
+    logError("admin_child_custody_update_failed", updateErr, { scope: "admin.addChildCustodyEvent", childId });
+  }
 
   revalidatePath("/admin/ninos");
   revalidatePath(`/nino/${childId}`);
   return { ok: true };
 }
 
-// Oculta / restaura un registro de niño (moderación).
+// Oculta / restaura un registro de niño (moderación). Usa patch_report para que
+// la acción quede en audit_log con actor/before/after.
 export async function setChildHidden(id: string, hidden: boolean): Promise<Result> {
   try {
     await requireSuperAdmin();
@@ -647,8 +657,11 @@ export async function setChildHidden(id: string, hidden: boolean): Promise<Resul
   }
   if (!UUID_RE.test(id)) return { ok: false, error: "Id inválido." };
   const svc = getServerSupabase();
-  const { error } = await svc.from("unaccompanied_children").update({ hidden }).eq("id", id);
-  if (error) return { ok: false, error: "No se pudo actualizar." };
+  const { error } = await svc.rpc("patch_report", patchArgs("unaccompanied_children", id, { hidden }));
+  if (error) {
+    logError("admin_set_child_hidden_failed", error, { scope: "admin.setChildHidden", id });
+    return { ok: false, error: "No se pudo actualizar." };
+  }
   revalidatePath("/admin/ninos");
   revalidatePath("/ninos");
   revalidatePath(`/nino/${id}`);

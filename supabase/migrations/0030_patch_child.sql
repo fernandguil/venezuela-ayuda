@@ -1,4 +1,4 @@
--- 0026 · patch_child: editar un niño no acompañado + cadena de custodia (API)
+-- 0030 · patch_child: editar un niño no acompañado + cadena de custodia (API)
 --
 -- El PATCH /api/v1/reports/{id} de un `unaccompanied_child` NO puede ir por el RPC
 -- genérico patch_report: ese hace un UPDATE plano de UNA tabla. Editar un niño
@@ -93,4 +93,4 @@ $fn$;
 revoke execute on function patch_child(uuid, jsonb, uuid, text, text, text, text) from public;
 grant  execute on function patch_child(uuid, jsonb, uuid, text, text, text, text) to service_role;
 
-insert into applied_migrations (version) values ('0026') on conflict do nothing;
+insert into applied_migrations (version) values ('0030') on conflict do nothing;

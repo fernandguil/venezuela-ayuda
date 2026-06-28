@@ -681,9 +681,12 @@ export async function submitFoundChild(
   const nowIso = new Date().toISOString();
   try {
     const supabase = getServerSupabase();
-    const photoUrl = await uploadCheckinPhoto(supabase, id, form.get("photo_data"), {
-      prefix: "children/",
-    });
+    // Fotos de menores requieren bucket privado + URLs firmadas solo para admins.
+    // No subimos al bucket público mientras #94 no esté en staging; la foto nunca
+    // aparece en la vista pública, pero una URL pública filtrada desde logs/audit
+    // quedaría permanentemente accesible.
+    // TODO(#47, #94): habilitar cuando el bucket privado esté disponible.
+    const photoUrl: string | null = null;
     const { error } = await supabase.rpc(
       "ingest_reports",
       ingestArgs("unaccompanied_children", [
@@ -731,7 +734,8 @@ export async function submitFoundChild(
     // el trigger seed_child_custody (migración 0023) al insertar en
     // unaccompanied_children, así que TODA alta —UI, API o importador— arranca su
     // cadena igual. No lo sembramos acá para no duplicarlo.
-  } catch {
+  } catch (err) {
+    logError("child_submit_failed", err, { scope: "actions.submitFoundChild" });
     return {
       ok: false,
       error: "No pudimos guardar la información. Revisa tu conexión e intenta de nuevo.",
