@@ -481,6 +481,91 @@ export async function ingestBatch(input: {
   };
 }
 
+// --- Role management (RBAC) --------------------------------------------------
+
+export interface UserRoleRow {
+  email: string;
+  role_id: string;
+  role_name: string;
+  granted_by: string | null;
+  granted_at: string;
+}
+
+export async function listUserRoles(): Promise<UserRoleRow[]> {
+  try {
+    await requireSuperAdmin();
+  } catch {
+    return [];
+  }
+  const svc = getServerSupabase();
+  const { data } = await svc
+    .from("user_roles")
+    .select("email,role_id,granted_by,granted_at,roles(name)")
+    .order("granted_at", { ascending: false });
+  return ((data ?? []) as unknown[]).map((r: unknown) => {
+    const row = r as Record<string, unknown>;
+    const role = row.roles as { name: string } | null;
+    return {
+      email: String(row.email),
+      role_id: String(row.role_id),
+      role_name: role?.name ?? "",
+      granted_by: row.granted_by ? String(row.granted_by) : null,
+      granted_at: String(row.granted_at),
+    };
+  });
+}
+
+export interface RoleOption { id: string; name: string; description: string | null }
+
+export async function listRoles(): Promise<RoleOption[]> {
+  try {
+    await requireSuperAdmin();
+  } catch {
+    return [];
+  }
+  const svc = getServerSupabase();
+  const { data } = await svc.from("roles").select("id,name,description").order("name");
+  return (data ?? []) as RoleOption[];
+}
+
+export async function grantRole(email: string, roleName: string): Promise<Result> {
+  let me: string;
+  try {
+    me = await requireSuperAdmin();
+  } catch {
+    return { ok: false, error: "No autorizado." };
+  }
+  const clean = email.trim().toLowerCase();
+  if (!clean.includes("@")) return { ok: false, error: "Email inválido." };
+  const svc = getServerSupabase();
+  const { data: role } = await svc.from("roles").select("id").eq("name", roleName).maybeSingle();
+  if (!role) return { ok: false, error: "Rol no encontrado." };
+  const { error } = await svc
+    .from("user_roles")
+    .upsert({ email: clean, role_id: role.id, granted_by: me }, { onConflict: "email,role_id" });
+  if (error) return { ok: false, error: "No se pudo asignar el rol." };
+  revalidatePath("/admin/roles");
+  return { ok: true };
+}
+
+export async function revokeRole(email: string, roleId: string): Promise<Result> {
+  try {
+    await requireSuperAdmin();
+  } catch {
+    return { ok: false, error: "No autorizado." };
+  }
+  const clean = email.trim().toLowerCase();
+  const svc = getServerSupabase();
+  const { error } = await svc
+    .from("user_roles")
+    .delete()
+    .eq("email", clean)
+    .eq("role_id", roleId);
+  if (error) return { ok: false, error: "No se pudo quitar el rol." };
+  revalidatePath("/admin/roles");
+  return { ok: true };
+}
+
 export async function revokePartner(id: string): Promise<Result> {
   try {
     await requireSuperAdmin();

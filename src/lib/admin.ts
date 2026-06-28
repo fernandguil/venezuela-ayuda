@@ -1,9 +1,10 @@
 import "server-only";
 import { getAuthClient } from "@/lib/supabase/auth";
 import { getServerSupabase, isSupabaseConfigured } from "@/lib/supabase/server";
+import { hasPermission, getSession as getRbacSession } from "@/lib/rbac";
 
-// Returns the logged-in admin's email, or null if not authenticated OR not on
-// the allowlist. The allowlist (admin_emails) is read with the service key.
+// Returns the logged-in admin's email, or null if not authenticated or missing
+// the admin.access permission.
 export async function getAdminEmail(): Promise<string | null> {
   if (!isSupabaseConfigured()) return null;
   const auth = await getAuthClient();
@@ -15,34 +16,24 @@ export async function getAdminEmail(): Promise<string | null> {
   return (await isEmailAdmin(email)) ? email : null;
 }
 
+// Now delegates to RBAC. Checks `user_roles → role_permissions → permissions`
+// for the `admin.access` permission (backfilled from admin_emails by 0029).
 export async function isEmailAdmin(email: string): Promise<boolean> {
-  const svc = getServerSupabase();
-  const { data } = await svc
-    .from("admin_emails")
-    .select("email")
-    .eq("email", email.toLowerCase())
-    .maybeSingle();
-  return Boolean(data);
+  return hasPermission(email, "admin.access");
 }
 
-// True only for super-admins (admin_emails.is_super_admin). Super-admins can
-// create/remove admins, issue API keys, and run the batch ingest.
+// True for super-admins (admin.super permission). Super-admins can create/remove
+// admins, issue API keys, and run the batch ingest.
 export async function isSuperAdmin(email: string): Promise<boolean> {
-  const svc = getServerSupabase();
-  const { data } = await svc
-    .from("admin_emails")
-    .select("is_super_admin")
-    .eq("email", email.toLowerCase())
-    .maybeSingle();
-  return Boolean(data?.is_super_admin);
+  return hasPermission(email, "admin.super");
 }
 
 // One round-trip for the logged-in admin's identity + tier. Returns null if not
-// authenticated or not on the allowlist.
+// authenticated or missing admin.access.
 export async function getAdminSession(): Promise<{ email: string; isSuper: boolean } | null> {
-  const email = await getAdminEmail();
-  if (!email) return null;
-  return { email, isSuper: await isSuperAdmin(email) };
+  const rbac = await getRbacSession();
+  if (!rbac) return null;
+  return { email: rbac.email, isSuper: rbac.permissions.includes("admin.super") };
 }
 
 export interface AdminRow {
