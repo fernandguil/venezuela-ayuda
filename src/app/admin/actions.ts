@@ -88,6 +88,16 @@ export async function adminSignUp(_prev: AuthState, form: FormData): Promise<Aut
     return { error: GENERIC };
   }
 
+  // Constant-time floor: both "account exists" (1 bcrypt verify) and "account
+  // doesn't exist" (createUser bcrypt + signIn bcrypt) paths take at least
+  // SIGNUP_FLOOR_MS, hiding the difference from a timing oracle (#111).
+  const SIGNUP_FLOOR_MS = 600;
+  const deadline = Date.now() + SIGNUP_FLOOR_MS;
+  const floor = () => {
+    const ms = deadline - Date.now();
+    return ms > 0 ? new Promise<void>((r) => setTimeout(r, ms)) : Promise.resolve();
+  };
+
   const { error: createErr } = await svc.auth.admin.createUser({
     email,
     password,
@@ -95,6 +105,7 @@ export async function adminSignUp(_prev: AuthState, form: FormData): Promise<Aut
   });
   if (createErr && !/already|registered|exists/i.test(createErr.message)) {
     logWarn("admin_signup_create_failed", { scope: "admin.adminSignUp" }, createErr);
+    await floor();
     return { error: GENERIC };
   }
 
@@ -105,6 +116,7 @@ export async function adminSignUp(_prev: AuthState, form: FormData): Promise<Aut
     // esperado, no se loguea. Sólo el caso inesperado (creamos la cuenta recién y
     // aun así el sign-in falla) deja rastro.
     if (!createErr) logError("admin_signup_signin_failed", signErr, { scope: "admin.adminSignUp" });
+    await floor();
     return {
       error: createErr
         ? "Ese correo ya tiene una cuenta. Usa Iniciar sesión."
@@ -112,6 +124,7 @@ export async function adminSignUp(_prev: AuthState, form: FormData): Promise<Aut
     };
   }
   await svc.rpc("login_clear", { p_key: key });
+  await floor();
   redirect("/admin");
 }
 
