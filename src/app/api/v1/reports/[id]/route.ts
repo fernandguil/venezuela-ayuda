@@ -34,7 +34,40 @@ import { logError, logDebug } from "@/lib/log.mjs";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const MAX_PATCH_BODY_BYTES = 64 * 1024; // un patch es UN objeto; 64KB sobra
+const MAX_PATCH_BODY_BYTES = 64 * 1024;
+
+// Read the request body stream up to maxBytes. Returns { text } on success,
+// { overflow } if the cap is exceeded, or { error } on stream/decode failure.
+async function readBodyUpTo(
+  body: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+): Promise<{ text: string } | { overflow: true } | { error: true }> {
+  if (!body) return { text: "" };
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) return { overflow: true };
+      chunks.push(value);
+    }
+  } catch {
+    return { error: true };
+  } finally {
+    reader.releaseLock();
+  }
+  const combined = new Uint8Array(total);
+  let pos = 0;
+  for (const c of chunks) { combined.set(c, pos); pos += c.byteLength; }
+  try {
+    return { text: new TextDecoder().decode(combined) };
+  } catch {
+    return { error: true };
+  }
+}
 
 type Params = { params: Promise<{ id: string }> };
 type ReportTable = "checkins" | "help_requests" | "help_offers" | "damaged_reports";
@@ -164,6 +197,12 @@ export async function PATCH(req: Request, { params }: Params) {
   }
   const source = partner.source;
 
+  // Content-Type check BEFORE rate-limit: wrong media type is cheap to reject
+  // and must not consume the partner's rate-limit budget.
+  if (!requireJsonContentType(req.headers.get("content-type"))) {
+    return NextResponse.json(errorBody("Content-Type debe ser application/json.", requestId), { status: 415, headers: rid });
+  }
+
   const rl = await rateLimit(`reports:write:${source}`, { limit: 120, windowSec: 60 });
   if (!rl.ok) {
     return NextResponse.json(
@@ -172,20 +211,20 @@ export async function PATCH(req: Request, { params }: Params) {
     );
   }
 
-  // Content-Type JSON (415) + guard de tamaño (un patch es un objeto chico).
-  if (!requireJsonContentType(req.headers.get("content-type"))) {
-    return NextResponse.json(errorBody("Content-Type debe ser application/json.", requestId), { status: 415, headers: rid });
-  }
-  if (Number(req.headers.get("content-length") || 0) > MAX_PATCH_BODY_BYTES) {
+  // Stream body with a hard byte cap; content-length is client-controlled.
+  const read = await readBodyUpTo(req.body, MAX_PATCH_BODY_BYTES);
+  if ("overflow" in read) {
     return NextResponse.json(errorBody("Payload demasiado grande.", requestId), { status: 413, headers: rid });
   }
-
+  if ("error" in read) {
+    logDebug("report_patch_bad_json", { scope: "api.reports.id.PATCH", request_id: requestId });
+    return NextResponse.json(errorBody("Cuerpo JSON inválido.", requestId), { status: 400, headers: rid });
+  }
   let body: unknown;
   try {
-    body = await req.json();
-  } catch (err) {
+    body = JSON.parse(read.text);
+  } catch {
     logDebug("report_patch_bad_json", { scope: "api.reports.id.PATCH", request_id: requestId });
-    void err;
     return NextResponse.json(errorBody("Cuerpo JSON inválido.", requestId), { status: 400, headers: rid });
   }
   if (!body || typeof body !== "object" || Array.isArray(body)) {
