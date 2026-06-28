@@ -60,11 +60,36 @@ export function safeDbError(rawErr) {
 //   - X-Content-Type-Options: Vercel NO lo pone → lo seteamos.
 //   - X-Frame-Options / Referrer-Policy: tampoco → los seteamos.
 // Globales y seguros también para el sitio HTML (no rompen maps/GA).
+// CSP en modo SOLO-REPORTE a propósito. El sitio carga tiles de OpenStreetMap y
+// fotos desde Supabase Storage; arrancar en `Report-Only` recopila violaciones
+// reales en la consola del navegador SIN bloquear nada en producción. Cuando la
+// política esté afinada con esos reportes, se promueve a enforcing (renombrar la
+// cabecera a `Content-Security-Policy` y, opcionalmente, añadir `report-to`).
+// Es defensa-en-profundidad ante un XSS futuro (dependencia comprometida, popup de
+// maplibre, markdown): React ya escapa por defecto y no hay dangerouslySetInnerHTML,
+// pero hoy no hay ninguna barrera de CSP. Ajustar los orígenes (Supabase/tiles/, y
+// el host de MAP_STYLE_URL si se usa MapTiler) antes de enforcing.
+const CSP_REPORT_ONLY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'self'",
+  "form-action 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https://*.supabase.co https://*.tile.openstreetmap.org",
+  "font-src 'self' data:",
+  "connect-src 'self' https://*.supabase.co https://*.tile.openstreetmap.org",
+  "worker-src 'self' blob:",
+  "upgrade-insecure-requests",
+].join("; ");
+
 export const SECURITY_HEADERS = [
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "X-Frame-Options", value: "SAMEORIGIN" },
+  { key: "Content-Security-Policy-Report-Only", value: CSP_REPORT_ONLY },
 ];
 
 // Extra SÓLO para /api/*: el API no usa ninguna feature de browser, así que se
