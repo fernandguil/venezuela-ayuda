@@ -66,11 +66,14 @@ export async function rateLimit(
 }
 
 // Best-effort client identifier from proxy headers (Vercel sets these).
+// x-real-ip is set by Vercel to the observed client IP and cannot be spoofed
+// by the caller — unlike the first entry of x-forwarded-for, which is
+// client-supplied and trivially faked.
 export async function clientKey(scope: string): Promise<string> {
   const h = await headers();
   const ip =
+    h.get("x-real-ip")?.trim() ||
     h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    h.get("x-real-ip") ||
     "unknown";
   return `${scope}:${ip}`;
 }
