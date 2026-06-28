@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useHotkeys, type UseHotkeyDefinition } from "@tanstack/react-hotkeys";
+import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,9 +22,11 @@ import {
   commitGroupReview,
   getGroup,
   getGroupPacients,
+  rejectDuplicate,
   type GroupDetail,
   type GroupSummary,
   type PacientMatchSummary,
+  type PersonCluster,
   type RecordSummary,
 } from "@/lib/dedupeApi";
 import RecordCard from "./RecordCard";
@@ -45,6 +48,13 @@ export default function GroupReview({
   const [error, setError] = useState<string | null>(null);
   const [removed, setRemoved] = useState<Set<string>>(new Set());
   const [committing, setCommitting] = useState(false);
+  // Clusters the reviewer has explicitly rejected as "not the same person"
+  // (cluster key → true). These are recorded via the API immediately and the
+  // cluster is greyed out; on commit they're skipped so no merge is confirmed.
+  const [rejectedClusters, setRejectedClusters] = useState<Set<string>>(
+    new Set(),
+  );
+  const [rejecting, setRejecting] = useState<string | null>(null);
   // Hospital patient matches for this group (if any). Loaded best-effort; a
   // failure here never blocks the dedup workflow.
   const [pacients, setPacients] = useState<PacientMatchSummary[]>([]);
@@ -104,6 +114,48 @@ export default function GroupReview({
     });
   }, []);
 
+  // Explicitly reject a duplicate cluster: tell the API each secondary is NOT
+  // the same person as the primary. Records a negative decision (vs. the
+  // confirm path) so the engine won't re-propose the pair. On success the
+  // cluster is marked rejected and skipped at commit time.
+  const rejectCluster = useCallback(
+    async (cluster: PersonCluster) => {
+      if (!cluster.clusterId || rejecting) return;
+      const primary =
+        cluster.records.find((r) => r.record_id === cluster.primaryId) ??
+        cluster.records[0];
+      if (!primary) return;
+      const secondaries = cluster.records.filter(
+        (r) => r.record_id !== primary.record_id,
+      );
+      if (!secondaries.length) return;
+
+      setRejecting(cluster.key);
+      setError(null);
+      try {
+        await Promise.all(
+          secondaries.map((r) =>
+            rejectDuplicate(
+              {
+                primary_record_id: primary.record_id,
+                secondary_record_id: r.record_id,
+              },
+              dataset,
+            ),
+          ),
+        );
+        setRejectedClusters((prev) => new Set(prev).add(cluster.key));
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : "No se pudo rechazar el duplicado",
+        );
+      } finally {
+        setRejecting(null);
+      }
+    },
+    [rejecting, dataset],
+  );
+
   const keptCount = ordered.length - removed.size;
 
   const confirm = useCallback(async () => {
@@ -114,7 +166,9 @@ export default function GroupReview({
       const res = await commitGroupReview({
         groupId: summary.group_id,
         removedRecordIds: Array.from(removed),
-        clusters,
+        // Skip clusters already rejected via the API — they must not be
+        // re-confirmed as merges at commit time.
+        clusters: clusters.filter((c) => !rejectedClusters.has(c.key)),
         dataset,
       });
       if (res.errors.length) {
@@ -127,7 +181,7 @@ export default function GroupReview({
       setError(e instanceof Error ? e.message : "No se pudo confirmar");
       setCommitting(false);
     }
-  }, [detail, committing, summary.group_id, removed, clusters, dataset, onComplete]);
+  }, [detail, committing, summary.group_id, removed, clusters, rejectedClusters, dataset, onComplete]);
 
   // Flag the whole group as "not duplicates": keep only the first record of
   // each cluster, remove the rest (so no merges are confirmed).
@@ -194,10 +248,14 @@ export default function GroupReview({
       {clusters.map((cluster, ci) => {
         const tint = cluster.clusterId ? TINTS[ci % TINTS.length] : "#94a3b8";
         const isDuplicate = cluster.records.length > 1;
+        const isRejected = rejectedClusters.has(cluster.key);
         return (
           <Card
             key={cluster.key}
-            className="gap-0 overflow-hidden border-slate-200 bg-white py-0 shadow-none"
+            className={cn(
+              "gap-0 overflow-hidden border-slate-200 bg-white py-0 shadow-none",
+              isRejected && "opacity-60",
+            )}
           >
             <header
               className="flex items-center justify-between gap-2 px-4 py-3"
@@ -213,14 +271,36 @@ export default function GroupReview({
                     : "1 reporte"}
                 </p>
               </div>
-              {isDuplicate && (
-                <Badge
-                  className="shrink-0"
-                  style={{ backgroundColor: `${tint}1a`, color: tint }}
-                >
-                  duplicado
-                </Badge>
-              )}
+              <div className="flex shrink-0 items-center gap-2">
+                {isDuplicate && !isRejected && (
+                  <Badge
+                    style={{ backgroundColor: `${tint}1a`, color: tint }}
+                  >
+                    duplicado
+                  </Badge>
+                )}
+                {/* Explicit reject: only meaningful for proposed duplicate
+                    clusters (2+ records). Records a negative decision so the
+                    engine won't re-propose this merge. */}
+                {isDuplicate &&
+                  (isRejected ? (
+                    <Badge className="bg-destructive/10 text-destructive">
+                      rechazado
+                    </Badge>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={rejecting === cluster.key}
+                      onClick={() => rejectCluster(cluster)}
+                    >
+                      {rejecting === cluster.key
+                        ? "Rechazando…"
+                        : "No es duplicado"}
+                    </Button>
+                  ))}
+              </div>
             </header>
             <div className="space-y-2 px-3 pb-3">
               {cluster.records.map((r) => (

@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHotkeys } from "@tanstack/react-hotkeys";
-import { Menu } from "lucide-react";
+import { Menu, Search as SearchIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -16,6 +16,7 @@ import {
 import {
   listGroups,
   listDatasetOptions,
+  addGroupMember,
   DEFAULT_DATASET_SLUG,
   type GroupSummary,
 } from "@/lib/dedupeApi";
@@ -28,6 +29,7 @@ import {
 import GroupQueue from "./GroupQueue";
 import GroupReview from "./GroupReview";
 import DatasetSelector from "./DatasetSelector";
+import RecordSearch from "./RecordSearch";
 
 const PAGE = 50;
 // Renew the lock on this cadence. Must be comfortably under LOCK_TTL_SECONDS
@@ -61,6 +63,10 @@ export default function DedupeConsole() {
   const [reviewedCount, setReviewedCount] = useState(0);
   // Mobile: the queue lives in a slide-over drawer.
   const [queueOpen, setQueueOpen] = useState(false);
+  // Record-search panel (add a stray record into the open group) + a nonce that
+  // forces GroupReview to remount and refetch after a successful add.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [reviewNonce, setReviewNonce] = useState(0);
 
   // --- Locks: who is working which group ------------------------------------
   // groupId -> reviewer email, for every group locked by SOMEONE ELSE (mine are
@@ -251,6 +257,24 @@ export default function DedupeConsole() {
     [completedIds, lockedByOthers, releaseHeld, selectGroup],
   );
 
+  // Add a searched-up record into the currently open group, then force the
+  // review pane to refetch so the new member shows. Returns an error message
+  // for the search panel to display, or null on success.
+  const addRecordToGroup = useCallback(
+    async (recordId: string): Promise<string | null> => {
+      const gid = selected?.group_id;
+      if (!gid) return "No hay un grupo abierto.";
+      try {
+        await addGroupMember(gid, recordId, dataset);
+        setReviewNonce((n) => n + 1);
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e.message : "No se pudo agregar el registro";
+      }
+    },
+    [selected?.group_id, dataset],
+  );
+
   // Prev / next group navigation (← / → keys, and header buttons).
   const selectedIdx = useMemo(
     () => (selected ? groups.findIndex((g) => g.group_id === selected.group_id) : -1),
@@ -372,6 +396,36 @@ export default function DedupeConsole() {
             value={dataset}
             onChange={changeDataset}
           />
+          {/* Record search — pull a stray record into the open group. Disabled
+              until a group is open (add-member needs a target). */}
+          <Sheet open={searchOpen} onOpenChange={setSearchOpen}>
+            <SheetTrigger asChild>
+              <Button
+                variant="outline"
+                disabled={!selected}
+                title={
+                  selected
+                    ? "Buscar un registro para agregar al grupo"
+                    : "Abre un grupo primero"
+                }
+              >
+                <SearchIcon className="size-4" />
+                Buscar registro
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-[92vw] max-w-md p-0">
+              <SheetTitle className="border-b border-[#e6ecf2] px-4 py-3 text-base">
+                Buscar registro
+              </SheetTitle>
+              <div className="h-[calc(100%-3.25rem)]">
+                <RecordSearch
+                  dataset={dataset}
+                  currentGroupId={selected?.group_id ?? null}
+                  onAddToGroup={addRecordToGroup}
+                />
+              </div>
+            </SheetContent>
+          </Sheet>
           <div className="min-w-0 flex-1 lg:hidden">
             <Sheet open={queueOpen} onOpenChange={setQueueOpen}>
               <SheetTrigger asChild>
@@ -458,7 +512,7 @@ export default function DedupeConsole() {
 
         {selected ? (
           <GroupReview
-            key={`${dataset}:${selected.group_id}`}
+            key={`${dataset}:${selected.group_id}:${reviewNonce}`}
             summary={selected}
             dataset={dataset}
             onComplete={advance}

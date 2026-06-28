@@ -10,11 +10,14 @@
 //      same_group_or_family  -> "related but different people"
 //  - The reviewer's job per group: confirm true duplicates, reject false ones.
 //
-// All calls go straight from the browser to NEXT_PUBLIC_DEDUPE_API_URL.
+// Calls go from the browser to a same-origin proxy (`/api/dedupe`), which
+// forwards them to the real dedupe API server-side with the required
+// credentials attached (see `src/app/api/dedupe/[...path]/route.ts`). The API
+// key never reaches the browser. Override the base only for local testing via
+// NEXT_PUBLIC_DEDUPE_API_BASE.
 
 export const DEDUPE_API_URL = (
-  process.env.NEXT_PUBLIC_DEDUPE_API_URL ||
-  "https://venezuela-terremoto-c4gafbfpc0dadpcj.eastus-01.azurewebsites.net"
+  process.env.NEXT_PUBLIC_DEDUPE_API_BASE || "/api/dedupe"
 ).replace(/\/$/, "");
 
 // ---- Datasets --------------------------------------------------------------
@@ -192,6 +195,24 @@ export interface ListGroupsResponse {
   total: number;
 }
 
+// Full duplicate context for a single record (the drill-down view): the record
+// itself, the group it belongs to, every other record in that group, and the
+// duplicate relationships/records plus any hospital matches. Mirrors the API's
+// RecordDuplicateContext schema.
+export interface RecordDuplicateContext {
+  record: RecordSummary;
+  group: GroupSummary | null;
+  group_records: RecordSummary[];
+  duplicate_relationships: RelationshipSummary[];
+  duplicate_records: RecordSummary[];
+  pacient_matches: PacientMatchSummary[];
+  duplicate_average_score: number | null;
+  duplicate_mode_score: number | null;
+  has_found_record: boolean;
+  has_found_duplicate: boolean;
+  has_hospital_match: boolean;
+}
+
 // ---- Low-level fetch -------------------------------------------------------
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -290,6 +311,91 @@ export function removeGroupMember(
   return request<RecordSummary>(
     `${basePath(dataset)}/api/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(recordId)}`,
     { method: "DELETE" },
+  );
+}
+
+// Pull a stray record INTO a group. The counterpart to removeGroupMember: used
+// when the reviewer searches up a record that belongs with this group but the
+// engine didn't cluster it here.
+export function addGroupMember(
+  groupId: string,
+  recordId: string,
+  dataset?: string | null,
+): Promise<RecordSummary> {
+  return request<RecordSummary>(
+    `${basePath(dataset)}/api/groups/${encodeURIComponent(groupId)}/members`,
+    { method: "POST", body: JSON.stringify({ record_id: recordId }) },
+  );
+}
+
+// Explicitly reject a proposed duplicate (two records are NOT the same person).
+// The counterpart to confirmDuplicate — records a negative decision instead of
+// silently dropping the pair.
+export function rejectDuplicate(
+  body: {
+    primary_record_id: string;
+    secondary_record_id: string;
+    reason?: string | null;
+  },
+  dataset?: string | null,
+): Promise<RelationshipSummary> {
+  return request<RelationshipSummary>(
+    `${basePath(dataset)}/api/duplicates/reject`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+// Reject a relationship by its id (e.g. a "same group/family" link that's
+// wrong). Distinct from rejectDuplicate, which targets a record pair.
+export function rejectRelationship(
+  body: { relationship_id: string; reason?: string | null },
+  dataset?: string | null,
+): Promise<RelationshipSummary> {
+  return request<RelationshipSummary>(
+    `${basePath(dataset)}/api/relationships/reject`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+// Free-text search for individual records across the dataset (independent of
+// the group queue). Used to find a record to pull into a group, or to inspect
+// one person's duplicate context directly.
+export function searchRecords(params: {
+  q: string;
+  limit?: number;
+  dataset?: string | null;
+  signal?: AbortSignal;
+}): Promise<RecordSummary[]> {
+  const qs = new URLSearchParams({ q: params.q });
+  // API caps limit at 100 (default 25).
+  qs.set("limit", String(Math.min(params.limit ?? 25, 100)));
+  return request<RecordSummary[]>(
+    `${basePath(params.dataset)}/api/records/search?${qs.toString()}`,
+    { signal: params.signal },
+  );
+}
+
+// Full duplicate context for one record: its group, the other records in it,
+// the duplicate relationships/records, and any hospital matches.
+export function getRecordDuplicateContext(
+  recordId: string,
+  opts?: { dataset?: string | null; signal?: AbortSignal },
+): Promise<RecordDuplicateContext> {
+  return request<RecordDuplicateContext>(
+    `${basePath(opts?.dataset)}/api/records/${encodeURIComponent(recordId)}/duplicate-context`,
+    { signal: opts?.signal },
+  );
+}
+
+// Hospital patient matches for a single record (the per-record equivalent of
+// getGroupPacients).
+export function getRecordPacients(
+  recordId: string,
+  opts?: { dataset?: string | null; signal?: AbortSignal },
+): Promise<PacientMatchSummary[]> {
+  return request<PacientMatchSummary[]>(
+    `${basePath(opts?.dataset)}/api/records/${encodeURIComponent(recordId)}/pacients`,
+    { signal: opts?.signal },
   );
 }
 
