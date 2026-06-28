@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
 import { requireJsonContentType } from "@/lib/apiPolicy.mjs";
+import { readBodyUpTo } from "@/lib/bodyStream.mjs";
 import { logError } from "@/lib/log.mjs";
 
 // Sumidero de errores del error boundary del cliente (`src/app/error.tsx`). Un
@@ -39,24 +40,12 @@ export async function POST(req: Request) {
   }
 
   // Stream body with a hard byte cap; content-length is client-controlled.
+  const bodyResult = await readBodyUpTo(req.body, MAX_BODY_BYTES);
+  if ("overflow" in bodyResult || "error" in bodyResult)
+    return new NextResponse(null, { status: 204 });
   let body: { digest?: unknown };
   try {
-    const reader = req.body?.getReader();
-    if (!reader) return new NextResponse(null, { status: 204 });
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_BODY_BYTES) { await reader.cancel(); return new NextResponse(null, { status: 204 }); }
-      chunks.push(value);
-    }
-    reader.releaseLock();
-    const buf = new Uint8Array(total);
-    let pos = 0;
-    for (const c of chunks) { buf.set(c, pos); pos += c.byteLength; }
-    body = JSON.parse(new TextDecoder().decode(buf)) as { digest?: unknown };
+    body = JSON.parse(bodyResult.text) as { digest?: unknown };
   } catch {
     return new NextResponse(null, { status: 204 });
   }
