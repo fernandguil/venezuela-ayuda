@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { logError, logWarn } from "@/lib/log.mjs";
+import { getReviewer } from "@/lib/reviewer";
 
 // Server-side proxy for the deduplication review API.
 //
@@ -13,6 +14,13 @@ import { logError, logWarn } from "@/lib/log.mjs";
 // SERVER-ONLY env vars. The key never leaves the server. As a bonus, being
 // same-origin removes the CORS preflight the direct-from-browser client had to
 // tiptoe around.
+//
+// AUTH: this endpoint is the real security surface, not the /deduplicar page —
+// a same-origin proxy that injects the maintainer's credential. So it MUST gate
+// on a logged-in reviewer itself (the page's getReviewer() guard only protects
+// the UI). Without this, any anonymous caller could read PII and mutate the
+// shared dataset through `/api/dedupe/*`. We fail closed: no reviewer → 401,
+// before any credential is attached or any upstream call is made.
 //
 // Contract: this is a transparent catch-all. Whatever path/query/body the
 // client sends under `/api/dedupe/<rest>` is forwarded verbatim to
@@ -69,6 +77,16 @@ async function proxy(
       { detail: `Method ${method} not allowed` },
       { status: 405 },
     );
+  }
+
+  // Reviewer gate — the whole point of the proxy is that it holds a privileged
+  // credential, so it must only serve authenticated reviewers. getReviewer()
+  // returns null for anonymous users, non-allowlisted users, AND when Supabase
+  // isn't configured — all of which fail closed to 401 here.
+  const reviewer = await getReviewer();
+  if (!reviewer) {
+    logWarn("dedupe_proxy_unauthorized", { scope, status: 401 });
+    return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
   }
 
   if (!API_KEY && !API_TOKEN) {
