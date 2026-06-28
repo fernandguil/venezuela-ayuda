@@ -2,49 +2,48 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { fetchRequestResponses } from "@/app/actions";
+import { exchangeManageToken, fetchRequestResponses } from "@/app/actions";
 import type { RequestResponse } from "@/lib/types";
 import { timeAgo } from "@/lib/format";
 
-// Only the original requester (who holds the manage token) sees the responses.
-// The token comes from the URL on first visit and is then cached locally.
+const HASH_RE =
+  /^#t=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+// Only the original requester sees the responses. Access is a scoped HttpOnly
+// cookie (`canManage`); on a fresh report the value arrives in the URL fragment
+// and is exchanged for that cookie before loading.
 export default function RequestResponsesInbox({
   requestId,
-  urlToken,
+  canManage = false,
 }: {
   requestId: string;
-  urlToken?: string;
+  canManage?: boolean;
 }) {
   const t = useTranslations("components.requestResponsesInbox");
   const tc = useTranslations("common");
-  const [token, setToken] = useState<string | null>(urlToken ?? null);
+  const [granted, setGranted] = useState(canManage);
   const [responses, setResponses] = useState<RequestResponse[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
-  // Resolve the token: persist the URL token, or recover it from localStorage.
+  // On a fresh report, exchange the fragment value for the cookie before loading.
   useEffect(() => {
-    const key = "manage:" + requestId;
-    try {
-      if (urlToken) {
-        localStorage.setItem(key, urlToken);
-      } else {
-        const stored = localStorage.getItem(key);
-        if (stored) {
-          // eslint-disable-next-line react-hooks/set-state-in-effect
-          setToken(stored);
-        }
-      }
-    } catch {
-      // localStorage unavailable — ignore.
-    }
-  }, [requestId, urlToken]);
+    if (canManage) return;
+    const m = window.location.hash.match(HASH_RE);
+    if (!m) return;
+    exchangeManageToken("request", requestId, m[1])
+      .then((r) => {
+        if (r.ok) setGranted(true);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Load responses once, when a token becomes available.
+  // Load responses once access is granted.
   useEffect(() => {
-    if (!token || loaded) return;
+    if (!granted || loaded) return;
     let active = true;
-    fetchRequestResponses(requestId, token).then((res) => {
+    fetchRequestResponses(requestId).then((res) => {
       if (!active) return;
       setLoaded(true);
       if (res.ok) {
@@ -57,9 +56,9 @@ export default function RequestResponsesInbox({
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestId, token, loaded]);
+  }, [requestId, granted, loaded]);
 
-  if (!token) return null;
+  if (!granted) return null;
 
   const count = responses?.length ?? 0;
 

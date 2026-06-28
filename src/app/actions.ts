@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { getServerSupabase, isSupabaseConfigured } from "@/lib/supabase/server";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
@@ -169,7 +170,7 @@ export async function submitCheckin(
 
   revalidatePath("/buscar");
   revalidatePath("/mapa");
-  redirect(`/persona/${id}?nuevo=1&t=${manageToken}`);
+  redirect(`/persona/${id}?nuevo=1#t=${manageToken}`);
 }
 
 // 3. Help request -----------------------------------------------------------
@@ -233,7 +234,7 @@ export async function submitHelpRequest(
   }
 
   revalidatePath("/mapa");
-  redirect(`/solicitud/${id}?nuevo=1&t=${manageToken}`);
+  redirect(`/solicitud/${id}?nuevo=1#t=${manageToken}`);
 }
 
 // 3b. Damaged building report ----------------------------------------------
@@ -317,7 +318,7 @@ export async function submitDamagedReport(
   }
 
   revalidatePath("/mapa");
-  redirect(`/edificio/${id}?nuevo=1&t=${manageToken}`);
+  redirect(`/edificio/${id}?nuevo=1#t=${manageToken}`);
 }
 
 // 4. Help offer -------------------------------------------------------------
@@ -403,15 +404,50 @@ async function verifyManageToken(
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// El reportante recibe su valor de gestión en el fragmento de URL al crear el
+// reporte y lo intercambia, una sola vez, por una cookie HttpOnly acotada a la
+// ruta del reporte. Las acciones de gestión leen el valor desde esa cookie.
+const MANAGE_KIND = {
+  checkin: { table: "checkins", seg: "persona" },
+  request: { table: "help_requests", seg: "solicitud" },
+  damaged: { table: "damaged_reports", seg: "edificio" },
+} as const;
+type ManageKind = keyof typeof MANAGE_KIND;
+
+async function readManageCookie(id: string): Promise<string> {
+  return (await cookies()).get(`mt_${id}`)?.value ?? "";
+}
+
+export async function exchangeManageToken(
+  kind: ManageKind,
+  id: string,
+  token: string
+): Promise<{ ok: boolean }> {
+  if (!isSupabaseConfigured()) return { ok: false };
+  const limited = await rateLimit(await clientKey("manage"), { limit: 20, windowSec: 60 });
+  if (!limited.ok) return { ok: false };
+  if (!UUID_RE.test(id) || !token) return { ok: false };
+  const { table, seg } = MANAGE_KIND[kind];
+  if (!(await verifyManageToken(table, id, token))) return { ok: false };
+  (await cookies()).set(`mt_${id}`, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: `/${seg}/${id}`,
+    maxAge: 60 * 60 * 24 * 180,
+  });
+  return { ok: true };
+}
+
 export async function markCheckinFound(
   id: string,
-  token: string,
   found: boolean
 ): Promise<{ ok: boolean; error?: string }> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Servicio no disponible." };
   const limited = await rateLimit(await clientKey("manage"), { limit: 20, windowSec: 60 });
   if (!limited.ok)
     return { ok: false, error: `Demasiados intentos. Espera ${limited.retryAfterSec}s.` };
+  const token = await readManageCookie(id);
   if (!UUID_RE.test(id) || !token) return { ok: false, error: "No autorizado." };
   if (!(await verifyManageToken("checkins", id, token)))
     return { ok: false, error: "No autorizado." };
@@ -436,13 +472,13 @@ export async function markCheckinFound(
 
 export async function resolveHelpRequest(
   id: string,
-  token: string,
   resolved: boolean
 ): Promise<{ ok: boolean; error?: string }> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Servicio no disponible." };
   const limited = await rateLimit(await clientKey("manage"), { limit: 20, windowSec: 60 });
   if (!limited.ok)
     return { ok: false, error: `Demasiados intentos. Espera ${limited.retryAfterSec}s.` };
+  const token = await readManageCookie(id);
   if (!UUID_RE.test(id) || !token) return { ok: false, error: "No autorizado." };
   if (!(await verifyManageToken("help_requests", id, token)))
     return { ok: false, error: "No autorizado." };
@@ -465,13 +501,13 @@ export async function resolveHelpRequest(
 
 export async function resolveDamagedReport(
   id: string,
-  token: string,
   resolved: boolean
 ): Promise<{ ok: boolean; error?: string }> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Servicio no disponible." };
   const limited = await rateLimit(await clientKey("manage"), { limit: 20, windowSec: 60 });
   if (!limited.ok)
     return { ok: false, error: `Demasiados intentos. Espera ${limited.retryAfterSec}s.` };
+  const token = await readManageCookie(id);
   if (!UUID_RE.test(id) || !token) return { ok: false, error: "No autorizado." };
   if (!(await verifyManageToken("damaged_reports", id, token)))
     return { ok: false, error: "No autorizado." };
@@ -541,10 +577,10 @@ export async function submitSighting(
 }
 
 export async function fetchSightings(
-  checkinId: string,
-  token: string
+  checkinId: string
 ): Promise<{ ok: boolean; sightings?: Sighting[]; error?: string }> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Servicio no disponible." };
+  const token = await readManageCookie(checkinId);
   if (!UUID_RE.test(checkinId) || !token) return { ok: false, error: "No autorizado." };
   if (!(await verifyManageToken("checkins", checkinId, token)))
     return { ok: false, error: "No autorizado." };
@@ -607,10 +643,10 @@ export async function respondToRequest(
 }
 
 export async function fetchRequestResponses(
-  requestId: string,
-  token: string
+  requestId: string
 ): Promise<{ ok: boolean; responses?: RequestResponse[]; error?: string }> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Servicio no disponible." };
+  const token = await readManageCookie(requestId);
   if (!UUID_RE.test(requestId) || !token) return { ok: false, error: "No autorizado." };
   if (!(await verifyManageToken("help_requests", requestId, token)))
     return { ok: false, error: "No autorizado." };

@@ -2,6 +2,7 @@ import Image from "next/image";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
 import { getTranslations } from "next-intl/server";
 import Header from "@/components/Header";
 import ShareButtons from "@/components/ShareButtons";
@@ -32,12 +33,13 @@ export default async function Page({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ nuevo?: string; t?: string }>;
+  searchParams: Promise<{ nuevo?: string }>;
 }) {
   const { id } = await params;
-  const { nuevo, t } = await searchParams;
+  const { nuevo } = await searchParams;
   const r = await getDamagedReport(id);
   if (!r) notFound();
+  const canManage = Boolean((await cookies()).get(`mt_${r.id}`)?.value);
 
   const tr = await getTranslations("detail");
   const tD = await getTranslations("domain");
@@ -139,7 +141,7 @@ export default async function Page({
           kind="damaged"
           id={r.id}
           resolved={r.status === "RESOLVED"}
-          urlToken={t}
+          canManage={canManage}
           isNew={nuevo === "1"}
         />
 

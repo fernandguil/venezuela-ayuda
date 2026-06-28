@@ -4,63 +4,81 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
+  exchangeManageToken,
   markCheckinFound,
   resolveHelpRequest,
   resolveDamagedReport,
 } from "@/app/actions";
 import { siteUrl } from "@/lib/share";
 
-// Reporter-only management. The secret manage token comes from the URL at
-// creation time (and is persisted in this browser), so a random visitor with
-// only the public id sees nothing.
+const HASH_RE =
+  /^#t=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+// Reporter-only management. On a fresh report the value arrives in the URL
+// fragment and is exchanged once for a scoped HttpOnly cookie; later visits rely
+// on that cookie (`canManage`). A random visitor with only the public id sees
+// nothing.
 export default function ManageControls({
   kind,
   id,
   resolved,
-  urlToken,
+  canManage = false,
   isNew = false,
 }: {
   kind: "checkin" | "request" | "damaged";
   id: string;
   resolved: boolean;
-  urlToken?: string;
+  canManage?: boolean;
   isNew?: boolean;
 }) {
   const router = useRouter();
   const t = useTranslations("components.manageControls");
   const tc = useTranslations("common");
-  const [token, setToken] = useState<string | null>(urlToken ?? null);
+  // `linkValue` is the raw value, kept in memory only to build the share link
+  // right after creation. `granted` gates the controls (cookie or fresh claim).
+  const [linkValue, setLinkValue] = useState<string | null>(null);
+  const [granted, setGranted] = useState(canManage);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    try {
-      if (urlToken) {
-        localStorage.setItem("manage:" + id, urlToken);
-      } else {
-        const stored = localStorage.getItem("manage:" + id);
-        // Syncing from a browser-only store (localStorage) — must happen post-mount.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        if (stored) setToken(stored);
-      }
-    } catch {
-      /* localStorage unavailable */
-    }
+    if (canManage) return;
+    const m = window.location.hash.match(HASH_RE);
+    if (!m) return;
+    const value = m[1];
+    exchangeManageToken(kind, id, value)
+      .then((r) => {
+        if (r.ok) {
+          setLinkValue(value);
+          setGranted(true);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        try {
+          window.history.replaceState(
+            null,
+            "",
+            window.location.pathname + window.location.search
+          );
+        } catch {
+          /* ignore */
+        }
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // No token known and not a fresh report → render nothing.
-  if (!token && !isNew) return null;
+  if (!granted && !isNew) return null;
 
   const path = `/${
     kind === "checkin" ? "persona" : kind === "request" ? "solicitud" : "edificio"
   }/${id}`;
 
   async function copyManageLink() {
-    if (!token) return;
+    if (!linkValue) return;
     try {
-      await navigator.clipboard.writeText(siteUrl(`${path}?t=${token}`));
+      await navigator.clipboard.writeText(siteUrl(`${path}#t=${linkValue}`));
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -69,16 +87,15 @@ export default function ManageControls({
   }
 
   async function toggle() {
-    if (!token) return;
     setPending(true);
     setError(null);
     try {
       const result =
         kind === "checkin"
-          ? await markCheckinFound(id, token, !resolved)
+          ? await markCheckinFound(id, !resolved)
           : kind === "request"
-            ? await resolveHelpRequest(id, token, !resolved)
-            : await resolveDamagedReport(id, token, !resolved);
+            ? await resolveHelpRequest(id, !resolved)
+            : await resolveDamagedReport(id, !resolved);
       if (result.ok) {
         router.refresh();
       } else {
@@ -106,7 +123,7 @@ export default function ManageControls({
 
   return (
     <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-      {isNew && token && (
+      {isNew && linkValue && (
         <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
           <p className="font-bold text-amber-900">
             {t("saveLinkNotice")}
@@ -122,7 +139,7 @@ export default function ManageControls({
         </div>
       )}
 
-      {token && (
+      {granted && (
         <button
           type="button"
           onClick={toggle}

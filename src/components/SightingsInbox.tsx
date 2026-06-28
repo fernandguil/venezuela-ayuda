@@ -2,49 +2,48 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { fetchSightings } from "@/app/actions";
+import { exchangeManageToken, fetchSightings } from "@/app/actions";
 import type { Sighting } from "@/lib/types";
 import { timeAgo } from "@/lib/format";
 
-// Only the original reporter (who holds the manage token) sees the avisos.
-// The token comes from the URL on first visit and is then cached locally.
+const HASH_RE =
+  /^#t=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+// Only the original reporter sees the avisos. Access is a scoped HttpOnly cookie
+// (`canManage`); on a fresh report the value arrives in the URL fragment and is
+// exchanged for that cookie before loading.
 export default function SightingsInbox({
   checkinId,
-  urlToken,
+  canManage = false,
 }: {
   checkinId: string;
-  urlToken?: string;
+  canManage?: boolean;
 }) {
   const t = useTranslations("components.sightingsInbox");
   const tc = useTranslations("common");
-  const [token, setToken] = useState<string | null>(urlToken ?? null);
+  const [granted, setGranted] = useState(canManage);
   const [sightings, setSightings] = useState<Sighting[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
-  // Resolve the token: persist the URL token, or recover it from localStorage.
+  // On a fresh report, exchange the fragment value for the cookie before loading.
   useEffect(() => {
-    const key = "manage:" + checkinId;
-    try {
-      if (urlToken) {
-        localStorage.setItem(key, urlToken);
-      } else {
-        const stored = localStorage.getItem(key);
-        if (stored) {
-          // eslint-disable-next-line react-hooks/set-state-in-effect
-          setToken(stored);
-        }
-      }
-    } catch {
-      // localStorage unavailable — ignore.
-    }
-  }, [checkinId, urlToken]);
+    if (canManage) return;
+    const m = window.location.hash.match(HASH_RE);
+    if (!m) return;
+    exchangeManageToken("checkin", checkinId, m[1])
+      .then((r) => {
+        if (r.ok) setGranted(true);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Load avisos once, when a token becomes available.
+  // Load avisos once access is granted.
   useEffect(() => {
-    if (!token || loaded) return;
+    if (!granted || loaded) return;
     let active = true;
-    fetchSightings(checkinId, token).then((res) => {
+    fetchSightings(checkinId).then((res) => {
       if (!active) return;
       setLoaded(true);
       if (res.ok) {
@@ -57,9 +56,9 @@ export default function SightingsInbox({
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [checkinId, token, loaded]);
+  }, [checkinId, granted, loaded]);
 
-  if (!token) return null;
+  if (!granted) return null;
 
   const count = sightings?.length ?? 0;
 
