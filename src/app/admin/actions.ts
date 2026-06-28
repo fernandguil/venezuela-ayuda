@@ -82,10 +82,45 @@ export async function adminSignUp(_prev: AuthState, form: FormData): Promise<Aut
   // (cierra el oráculo de enumeración). Los intentos no autorizados cuentan para
   // el throttle igual que un login fallido.
   const GENERIC = "No se pudo crear la cuenta. Verifica los datos o contacta a un administrador.";
-
-  if (!(await isEmailAdmin(email))) {
+  const fail = async () => {
     await svc.rpc("login_record_failure", { p_key: key, ...LOGIN_LIMIT });
     return { error: GENERIC };
+  };
+
+  // Cierre del oráculo de TIMING (B5, ronda 2): NO hacemos short-circuit por
+  // allowlist antes del auth. Todo correo —esté o no en la allowlist— paga el
+  // mismo round-trip a GoTrue + verificación bcrypt vía signInWithPassword. Así
+  // el tiempo de respuesta deja de depender de la pertenencia a la allowlist.
+  const auth = await getAuthClient();
+  const { error: signErr } = await auth.auth.signInWithPassword({ email, password });
+  if (!signErr) {
+    // La cuenta ya existe y la contraseña coincide. La decisión de admin se toma
+    // AL FINAL (igual que adminSignIn): un correo válido no-admin recibe la misma
+    // respuesta genérica, sin revelar que la cuenta existe.
+    if (!(await isEmailAdmin(email))) {
+      await auth.auth.signOut();
+      return fail();
+    }
+    await svc.rpc("login_clear", { p_key: key });
+    redirect("/admin");
+  }
+
+  // Sign-in falló: la cuenta no existe o la contraseña no coincide. Sólo a partir
+  // de aquí distinguimos por allowlist. Igualamos un segundo round-trip de auth en
+  // AMBAS ramas para reducir la señal de timing por pertenencia a la allowlist.
+  //
+  // Limitación conocida (B5): la rama allowlist usa svc.auth.admin.createUser
+  // (endpoint admin/v1/users + bcrypt-HASH al crear), mientras el padding de la
+  // rama no-allowlist usa un signInWithPassword dummy (bcrypt-VERIFY, y solo si la
+  // cuenta existe). Son costes de orden similar pero NO idénticos: queda un residuo
+  // de timing entre ambos endpoints que no es eliminable sin mover toda la lógica a
+  // una RPC server-side de tiempo constante, fuera del alcance mínimo de B5. El
+  // oráculo POR MENSAJE/STATUS sí queda cerrado (respuesta GENERIC indistinguible).
+  if (!(await isEmailAdmin(email))) {
+    // Padding de coste: sign-in dummy con contraseña aleatoria, para aproximar el
+    // segundo round-trip de auth que el camino allowlist gasta en createUser.
+    await auth.auth.signInWithPassword({ email, password: generateApiKey() });
+    return fail();
   }
 
   const { error: createErr } = await svc.auth.admin.createUser({
@@ -93,23 +128,24 @@ export async function adminSignUp(_prev: AuthState, form: FormData): Promise<Aut
     password,
     email_confirm: true,
   });
-  if (createErr && !/already|registered|exists/i.test(createErr.message)) {
-    logWarn("admin_signup_create_failed", { scope: "admin.adminSignUp" }, createErr);
-    return { error: GENERIC };
+  // Detección ESTRUCTURADA de "la cuenta ya existe" vía el código de error de la
+  // API (no por regex sobre el mensaje, que cambia entre versiones). Si ya existe,
+  // significa que el sign-in de arriba falló por contraseña incorrecta: respuesta
+  // genérica INDISTINGUIBLE, sin revelar que el correo ya tenía cuenta.
+  if (createErr) {
+    const ALREADY_EXISTS = new Set(["email_exists", "user_already_exists"]);
+    if (!ALREADY_EXISTS.has(createErr.code ?? ""))
+      logWarn("admin_signup_create_failed", { scope: "admin.adminSignUp" }, createErr);
+    return fail();
   }
 
-  const auth = await getAuthClient();
-  const { error: signErr } = await auth.auth.signInWithPassword({ email, password });
-  if (signErr) {
-    // `createErr` ⇒ la cuenta ya existía y la contraseña dada no coincide: flujo
-    // esperado, no se loguea. Sólo el caso inesperado (creamos la cuenta recién y
-    // aun así el sign-in falla) deja rastro.
-    if (!createErr) logError("admin_signup_signin_failed", signErr, { scope: "admin.adminSignUp" });
-    return {
-      error: createErr
-        ? "Ese correo ya tiene una cuenta. Usa Iniciar sesión."
-        : GENERIC,
-    };
+  // Cuenta recién creada para un admin allowlisted: iniciamos sesión.
+  const { error: postCreateErr } = await auth.auth.signInWithPassword({ email, password });
+  if (postCreateErr) {
+    // Caso inesperado: creamos la cuenta y aun así el sign-in falla. Se loguea
+    // porque no es un flujo esperado; la respuesta sigue siendo genérica.
+    logError("admin_signup_signin_failed", postCreateErr, { scope: "admin.adminSignUp" });
+    return fail();
   }
   await svc.rpc("login_clear", { p_key: key });
   redirect("/admin");
