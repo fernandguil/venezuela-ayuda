@@ -70,7 +70,7 @@ insert into user_roles (email, role_id, granted_by)
   from roles where name = 'reviewer';
 ```
 
-O desde el panel admin (UI pendiente — issue #31).
+O desde el panel admin en `/admin/roles` (super-admin únicamente).
 
 ## Migración desde admin_emails
 
