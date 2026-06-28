@@ -26,6 +26,7 @@ import { computeRisk, type RiskAnswers } from "@/lib/risk";
 import { VA_SOURCE } from "@/lib/canonical.mjs";
 import { ingestArgs, patchArgs, buildCenterRow } from "@/lib/internalWrite.mjs";
 import { frIndexPerson, frDeletePerson } from "@/lib/fr";
+import { shouldIndexForFR } from "@/lib/frConsent.mjs";
 import { logError, logWarn } from "@/lib/log.mjs";
 import type { Sighting, RequestResponse } from "@/lib/types";
 
@@ -117,8 +118,10 @@ export async function submitCheckin(
   const manageToken = crypto.randomUUID();
   // FR indexing requires explicit consent AND must not be a third-party photo.
   // LOOKING_FOR_SOMEONE = submitter uploads a photo of someone else → never index.
-  const frConsent =
-    form.get("fr_consent") === "1" && status !== "LOOKING_FOR_SOMEONE";
+  const frConsent = shouldIndexForFR(
+    form.get("fr_consent") as string | null,
+    status,
+  );
   try {
     const supabase = getServerSupabase();
     const photoUrl = await uploadCheckinPhoto(supabase, id, form.get("photo_data"));
