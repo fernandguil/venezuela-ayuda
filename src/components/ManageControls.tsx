@@ -7,6 +7,7 @@ import {
   markCheckinFound,
   resolveHelpRequest,
   resolveDamagedReport,
+  removeFrIndex,
 } from "@/app/actions";
 import { siteUrl } from "@/lib/share";
 
@@ -19,20 +20,25 @@ export default function ManageControls({
   resolved,
   urlToken,
   isNew = false,
+  frIndexed = false,
 }: {
   kind: "checkin" | "request" | "damaged";
   id: string;
   resolved: boolean;
   urlToken?: string;
   isNew?: boolean;
+  frIndexed?: boolean;
 }) {
   const router = useRouter();
   const t = useTranslations("components.manageControls");
   const tc = useTranslations("common");
+  const tFr = useTranslations("forms.fr");
   const [token, setToken] = useState<string | null>(urlToken ?? null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [frPending, setFrPending] = useState(false);
+  const [frDone, setFrDone] = useState(false);
 
   useEffect(() => {
     try {
@@ -91,6 +97,25 @@ export default function ManageControls({
     }
   }
 
+  async function handleRemoveFr() {
+    if (!token) return;
+    setFrPending(true);
+    setError(null);
+    try {
+      const result = await removeFrIndex(id, token);
+      if (result.ok) {
+        setFrDone(true);
+        router.refresh();
+      } else {
+        setError(result.error ?? t("updateFailed"));
+      }
+    } catch {
+      setError(t("updateFailedRetry"));
+    } finally {
+      setFrPending(false);
+    }
+  }
+
   const actionLabel =
     kind === "checkin"
       ? resolved
@@ -140,6 +165,23 @@ export default function ManageControls({
         >
           {pending ? t("saving") : actionLabel}
         </button>
+      )}
+
+      {token && kind === "checkin" && frIndexed && !frDone && (
+        <div className="mt-3 border-t border-line pt-3">
+          <button
+            type="button"
+            onClick={handleRemoveFr}
+            disabled={frPending}
+            className="text-sm font-medium text-slate-500 underline underline-offset-2 disabled:opacity-60"
+          >
+            {frPending ? tFr("optOutPending") : tFr("optOut")}
+          </button>
+        </div>
+      )}
+
+      {frDone && (
+        <p className="mt-3 text-sm font-medium text-green-700">{tFr("optOutDone")}</p>
       )}
 
       {error && <p className="mt-3 text-sm font-bold text-red-600">{error}</p>}

@@ -25,6 +25,7 @@ export interface PublicCheckin {
   place_name: string | null;
   source: string | null;
   source_url: string | null;
+  fr_consent: boolean;
 }
 
 // A needed tool/equipment with an estimated quantity.

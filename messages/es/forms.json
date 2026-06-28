@@ -154,6 +154,11 @@
     "yes": "Sí, es la misma",
     "no": "No, es otra persona",
     "sameNote": "Para evitar reportes duplicados, revisa si ya existe el reporte de esta persona. Puedes continuar de todas formas.",
-    "assistiveNote": "Coincidencias por rostro — siempre requieren verificación humana."
+    "assistiveNote": "Coincidencias por rostro — siempre requieren verificación humana.",
+    "consentLabel": "Autorizo el uso de reconocimiento facial asistivo en esta foto",
+    "consentNote": "Tu foto se analizará para ayudar a encontrarte comparando con otras personas registradas. Puedes retirar este permiso después desde la página de tu reporte.",
+    "optOut": "Retirar de reconocimiento facial",
+    "optOutPending": "Retirando…",
+    "optOutDone": "Tu foto fue retirada del índice de reconocimiento facial."
   }
 }

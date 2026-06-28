@@ -154,6 +154,11 @@
     "yes": "Yes, it's the same",
     "no": "No, it's someone else",
     "sameNote": "To avoid duplicate reports, check whether a report for this person already exists. You can continue anyway.",
-    "assistiveNote": "Face matches — always require human verification."
+    "assistiveNote": "Face matches — always require human verification.",
+    "consentLabel": "I consent to assistive facial recognition on this photo",
+    "consentNote": "Your photo will be analyzed to help find you by comparing with other registered people. You can withdraw this permission later from your report page.",
+    "optOut": "Remove from facial recognition",
+    "optOutPending": "Removing…",
+    "optOutDone": "Your photo has been removed from the facial recognition index."
   }
 }

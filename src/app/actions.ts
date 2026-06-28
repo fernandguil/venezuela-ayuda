@@ -25,7 +25,7 @@ import {
 import { computeRisk, type RiskAnswers } from "@/lib/risk";
 import { VA_SOURCE } from "@/lib/canonical.mjs";
 import { ingestArgs, patchArgs, buildCenterRow } from "@/lib/internalWrite.mjs";
-import { frIndexPerson } from "@/lib/fr";
+import { frIndexPerson, frDeletePerson } from "@/lib/fr";
 import { logError, logWarn } from "@/lib/log.mjs";
 import type { Sighting, RequestResponse } from "@/lib/types";
 
@@ -115,6 +115,10 @@ export async function submitCheckin(
   // so private phone numbers stay unreadable via the public key.
   const id = crypto.randomUUID();
   const manageToken = crypto.randomUUID();
+  // FR indexing requires explicit consent AND must not be a third-party photo.
+  // LOOKING_FOR_SOMEONE = submitter uploads a photo of someone else → never index.
+  const frConsent =
+    form.get("fr_consent") === "1" && status !== "LOOKING_FOR_SOMEONE";
   try {
     const supabase = getServerSupabase();
     const photoUrl = await uploadCheckinPhoto(supabase, id, form.get("photo_data"));
@@ -138,15 +142,14 @@ export async function submitCheckin(
           place_name: cleanOptional(form.get("place_name"), LIMITS.place_name),
           photo_url: photoUrl,
           manage_token: manageToken,
+          fr_consent: frConsent,
         },
       ])
     );
     if (error) throw error;
 
-    // Indexa la foto en el FR-API (asistivo, best-effort) para permitir dedup y
-    // conciliación por rostro entre plataformas. Nunca bloquea ni lanza, y no
-    // envía datos privados (el teléfono queda fuera).
-    if (photoUrl) {
+    // FR indexing: only when submitter explicitly consented and photo is their own.
+    if (photoUrl && frConsent) {
       await frIndexPerson({
         externalId: id,
         imageUrl: photoUrl,
@@ -483,6 +486,38 @@ export async function resolveDamagedReport(
   revalidatePath("/mapa");
   revalidatePath("/buscar");
   revalidatePath(`/edificio/${id}`);
+  return { ok: true };
+}
+
+// Withdraws FR consent and removes the checkin from the facial-recognition index.
+// Requires the manage token so only the original submitter can opt out.
+// fr.ts calls are best-effort — the DB flag is cleared regardless of FR API outcome.
+export async function removeFrIndex(
+  id: string,
+  token: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Servicio no disponible." };
+  const limited = await rateLimit(await clientKey("manage"), { limit: 20, windowSec: 60 });
+  if (!limited.ok)
+    return { ok: false, error: `Demasiados intentos. Espera ${limited.retryAfterSec}s.` };
+  if (!UUID_RE.test(id) || !token) return { ok: false, error: "No autorizado." };
+  if (!(await verifyManageToken("checkins", id, token)))
+    return { ok: false, error: "No autorizado." };
+  // Best-effort: delete from the FR index. A 404 (never indexed or already removed)
+  // is treated as success inside frDeletePerson — the outcome is the same.
+  await frDeletePerson(id);
+  try {
+    const supabase = getServerSupabase();
+    const { error } = await supabase.rpc(
+      "patch_report",
+      patchArgs("checkins", id, { fr_consent: false })
+    );
+    if (error) throw error;
+  } catch (err) {
+    logError("fr_opt_out_failed", err, { scope: "actions.removeFrIndex" });
+    return { ok: false, error: "No se pudo actualizar. Intenta de nuevo." };
+  }
+  revalidatePath(`/persona/${id}`);
   return { ok: true };
 }
 

@@ -23,6 +23,28 @@ export function frHeaders(extra?: Record<string, string>): Record<string, string
 // Best-effort: nunca lanza (el registro no debe romperse si el FR falla) y NO
 // envía datos privados (el teléfono queda fuera); solo nombre, ubicación pública
 // y la URL pública de la foto (que ya es pública en el bucket).
+// Removes a person from the FR index (opt-out / consent withdrawal).
+// Best-effort: never throws. A 404 from the FR API (person never indexed or
+// already removed) is treated as success — the desired end state is the same.
+export async function frDeletePerson(externalId: string): Promise<void> {
+  if (!frConfigured()) return;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const res = await fetch(
+      `${FR_BASE}/v1/index/${encodeURIComponent(externalId)}`,
+      { method: "DELETE", headers: frHeaders(), signal: ctrl.signal }
+    );
+    if (!res.ok && res.status !== 404) {
+      logWarn("fr_delete_failed", { scope: "data.frDeletePerson", status: res.status });
+    }
+  } catch (err) {
+    logWarn("fr_delete_failed", { scope: "data.frDeletePerson" }, err);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function frIndexPerson(p: {
   externalId: string;
   imageUrl: string | null;

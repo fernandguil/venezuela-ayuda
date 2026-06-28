@@ -126,15 +126,14 @@ export default async function Page({
           </div>
         </article>
 
-        {c.status === "LOOKING_FOR_SOMEONE" && (
-          <ManageControls
-            kind="checkin"
-            id={c.id}
-            resolved={!!c.found_at}
-            urlToken={t}
-            isNew={nuevo === "1"}
-          />
-        )}
+        <ManageControls
+          kind="checkin"
+          id={c.id}
+          resolved={!!c.found_at}
+          urlToken={t}
+          isNew={nuevo === "1"}
+          frIndexed={c.fr_consent}
+        />
 
         {c.status === "LOOKING_FOR_SOMEONE" && !c.found_at && (
           <div className="mt-6">

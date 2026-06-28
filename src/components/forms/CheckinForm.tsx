@@ -44,8 +44,12 @@ export default function CheckinForm({
   const [frChecking, setFrChecking] = useState(false);
   const [frCands, setFrCands] = useState<FrCandidate[] | null>(null);
   const [frAnswer, setFrAnswer] = useState<null | "same" | "other">(null);
+  const [hasPhoto, setHasPhoto] = useState(false);
+  const [frConsent, setFrConsent] = useState(false);
 
   async function onPhoto(dataUrl: string | null) {
+    setHasPhoto(Boolean(dataUrl));
+    if (!dataUrl) setFrConsent(false);
     setFrCands(null);
     setFrAnswer(null);
     if (!dataUrl || !isMissing) return;
@@ -184,8 +188,29 @@ export default function CheckinForm({
       <div>
         <PhotoInput
           label={isMissing ? tc("missingPhotoLabel") : tc("photoLabel")}
-          onPhoto={isMissing ? onPhoto : undefined}
+          onPhoto={isMissing ? onPhoto : (dataUrl) => { setHasPhoto(Boolean(dataUrl)); if (!dataUrl) setFrConsent(false); }}
         />
+
+        {/* Consent checkbox: only when the user attached a photo of themselves
+            (not for LOOKING_FOR_SOMEONE, where the photo belongs to a third party). */}
+        {hasPhoto && !isMissing && (
+          <div className="mt-3 rounded-xl border border-line bg-[#f5f8fc] p-3">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                name="fr_consent"
+                value="1"
+                checked={frConsent}
+                onChange={(e) => setFrConsent(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-action"
+              />
+              <span className="text-sm font-medium text-ink">
+                {tFr("consentLabel")}
+              </span>
+            </label>
+            <p className="mt-1 pl-7 text-xs text-[#5b6b7b]">{tFr("consentNote")}</p>
+          </div>
+        )}
 
         {frChecking && (
           <p className="mt-2 text-sm text-[#5b6b7b]">{tFr("checking")}</p>
