@@ -9,6 +9,7 @@
 // importan tanto el TS (vía allowJs, como ingest.mjs) como los tests.
 
 import { VA_PARTNER_ID, VA_SOURCE } from "./canonical.mjs";
+import { hashManageToken } from "./manageToken.mjs";
 
 // Contexto forense del request (request_id/ip/user_agent) para el audit. En un
 // server action no hay objeto Request; si el caller no lo deriva, se deja null —
@@ -72,6 +73,7 @@ export function buildCenterRow(input) {
     verified: false,
     hidden: false,
     manage_token: input.manage_token ?? null,
+    manage_token_hash: input.manage_token ? hashManageToken(input.manage_token) : null,
     source: "user",
   };
 }

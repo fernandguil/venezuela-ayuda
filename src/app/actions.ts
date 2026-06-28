@@ -25,6 +25,7 @@ import {
 import { computeRisk, type RiskAnswers } from "@/lib/risk";
 import { VA_SOURCE } from "@/lib/canonical.mjs";
 import { ingestArgs, patchArgs, buildCenterRow } from "@/lib/internalWrite.mjs";
+import { hashManageToken, tokensMatch } from "@/lib/manageToken.mjs";
 import { frIndexPerson } from "@/lib/fr";
 import { logError, logWarn } from "@/lib/log.mjs";
 import type { Sighting, RequestResponse } from "@/lib/types";
@@ -138,6 +139,7 @@ export async function submitCheckin(
           place_name: cleanOptional(form.get("place_name"), LIMITS.place_name),
           photo_url: photoUrl,
           manage_token: manageToken,
+          manage_token_hash: hashManageToken(manageToken),
         },
       ])
     );
@@ -217,6 +219,7 @@ export async function submitHelpRequest(
           place_name: cleanOptional(form.get("place_name"), LIMITS.place_name),
           items: items.length ? items : null,
           manage_token: manageToken,
+          manage_token_hash: hashManageToken(manageToken),
         },
       ])
     );
@@ -297,6 +300,7 @@ export async function submitDamagedReport(
           contact: cleanOptional(form.get("contact"), LIMITS.phone),
           photo_url: photoUrl,
           manage_token: manageToken,
+          manage_token_hash: hashManageToken(manageToken),
           risk_level: risk?.level ?? null,
           risk_priority: risk?.priority ?? null,
           risk_answers: riskAnswers,
@@ -383,7 +387,7 @@ async function verifyManageToken(
   const supabase = getServerSupabase();
   const { data, error } = await supabase
     .from(table)
-    .select("manage_token")
+    .select("manage_token, manage_token_hash")
     .eq("id", id)
     .maybeSingle();
   if (error) {
@@ -391,6 +395,8 @@ async function verifyManageToken(
     return false;
   }
   if (!data) return false;
+  // Prefiere la columna hash; usa el valor directo solo si el hash no está poblado.
+  if (data.manage_token_hash) return tokensMatch(token, data.manage_token_hash);
   return data.manage_token != null && data.manage_token === token;
 }
 

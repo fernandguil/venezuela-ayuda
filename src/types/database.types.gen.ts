@@ -198,6 +198,7 @@ export type Database = {
           location: unknown
           longitude: number | null
           manage_token: string | null
+          manage_token_hash: string | null
           message: string | null
           name: string
           phone_private: string | null
@@ -219,6 +220,7 @@ export type Database = {
           location?: unknown
           longitude?: number | null
           manage_token?: string | null
+          manage_token_hash?: string | null
           message?: string | null
           name: string
           phone_private?: string | null
@@ -240,6 +242,7 @@ export type Database = {
           location?: unknown
           longitude?: number | null
           manage_token?: string | null
+          manage_token_hash?: string | null
           message?: string | null
           name?: string
           phone_private?: string | null
@@ -266,6 +269,7 @@ export type Database = {
           location: unknown
           longitude: number | null
           manage_token: string | null
+          manage_token_hash: string | null
           name: string
           needs: string[]
           needs_volunteers: boolean | null
@@ -291,6 +295,7 @@ export type Database = {
           location?: unknown
           longitude?: number | null
           manage_token?: string | null
+          manage_token_hash?: string | null
           name: string
           needs?: string[]
           needs_volunteers?: boolean | null
@@ -316,6 +321,7 @@ export type Database = {
           location?: unknown
           longitude?: number | null
           manage_token?: string | null
+          manage_token_hash?: string | null
           name?: string
           needs?: string[]
           needs_volunteers?: boolean | null
@@ -343,6 +349,7 @@ export type Database = {
           location: unknown
           longitude: number | null
           manage_token: string | null
+          manage_token_hash: string | null
           photo_url: string | null
           place_name: string
           risk_answers: Json | null
@@ -368,6 +375,7 @@ export type Database = {
           location?: unknown
           longitude?: number | null
           manage_token?: string | null
+          manage_token_hash?: string | null
           photo_url?: string | null
           place_name: string
           risk_answers?: Json | null
@@ -393,6 +401,7 @@ export type Database = {
           location?: unknown
           longitude?: number | null
           manage_token?: string | null
+          manage_token_hash?: string | null
           photo_url?: string | null
           place_name?: string
           risk_answers?: Json | null
@@ -476,6 +485,7 @@ export type Database = {
           location: unknown
           longitude: number | null
           manage_token: string | null
+          manage_token_hash: string | null
           place_name: string | null
           source: string | null
           source_url: string | null
@@ -496,6 +506,7 @@ export type Database = {
           location?: unknown
           longitude?: number | null
           manage_token?: string | null
+          manage_token_hash?: string | null
           place_name?: string | null
           source?: string | null
           source_url?: string | null
@@ -516,6 +527,7 @@ export type Database = {
           location?: unknown
           longitude?: number | null
           manage_token?: string | null
+          manage_token_hash?: string | null
           place_name?: string | null
           source?: string | null
           source_url?: string | null
