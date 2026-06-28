@@ -16,7 +16,17 @@ import {
   VIEW_FOR_TABLE,
   RESOURCES,
   typeForResource,
+  roundCoord,
+  fuzzPersonCoords,
+  COORD_DP,
 } from "../src/lib/reports.mjs";
+
+function countDecimals(n) {
+  if (typeof n !== "number" || !Number.isFinite(n)) return 0;
+  const s = String(n);
+  const i = s.indexOf(".");
+  return i === -1 ? 0 : s.length - i - 1;
+}
 
 test("REPORT_TYPES son los 5 del catálogo (espejo de la escritura)", () => {
   assert.deepEqual(
@@ -176,4 +186,53 @@ test("parseSince: id que no es uuid → se descarta el id, conserva el timestamp
     createdAt: "2026-06-26T10:00:00Z",
     id: null,
   });
+});
+
+// ── B3: generalización de coordenadas de personas ───────────────────────────
+// Fuente única del redondeo del lado app (rutas que no pasan por la vista
+// fuzzeada: PATCH /reports/{id} y /history). Debe coincidir con la vista SQL.
+
+test("COORD_DP es 3 (mismo nº de decimales que la vista)", () => {
+  assert.equal(COORD_DP, 3);
+});
+
+test("roundCoord redondea a 3 decimales y conserva number", () => {
+  assert.equal(roundCoord(10.123456), 10.123);
+  assert.equal(roundCoord(-66.987654), -66.988);
+  assert.equal(typeof roundCoord(10.123456), "number");
+  assert.ok(countDecimals(roundCoord(10.1234567)) <= 3);
+});
+
+test("roundCoord pasa null/undefined/no-numérico sin tocar", () => {
+  assert.equal(roundCoord(null), null);
+  assert.equal(roundCoord(undefined), undefined);
+  assert.equal(roundCoord("x"), "x");
+  assert.equal(roundCoord(NaN) !== roundCoord(NaN), true); // NaN pasa tal cual
+});
+
+test("fuzzPersonCoords redondea lat/lng de tablas de personas (no muta original)", () => {
+  for (const table of ["checkins", "help_requests", "help_offers"]) {
+    const raw = { id: "1", latitude: 10.123456, longitude: -66.987654, city: "x" };
+    const out = fuzzPersonCoords(table, raw);
+    assert.equal(out.latitude, 10.123, `${table} lat`);
+    assert.equal(out.longitude, -66.988, `${table} lng`);
+    assert.equal(raw.latitude, 10.123456, "no muta el original");
+    assert.ok(countDecimals(out.latitude) <= 3);
+    assert.ok(countDecimals(out.longitude) <= 3);
+  }
+});
+
+test("fuzzPersonCoords NO toca damaged_reports (edificios = exacto)", () => {
+  const raw = { id: "d1", latitude: 10.123456, longitude: -66.987654 };
+  const out = fuzzPersonCoords("damaged_reports", raw);
+  assert.equal(out.latitude, 10.123456);
+  assert.equal(out.longitude, -66.987654);
+});
+
+test("fuzzPersonCoords tolera filas sin coords y valores nulos", () => {
+  assert.deepEqual(fuzzPersonCoords("checkins", { id: "1", city: "x" }), { id: "1", city: "x" });
+  const withNull = fuzzPersonCoords("checkins", { id: "1", latitude: null, longitude: null });
+  assert.equal(withNull.latitude, null);
+  assert.equal(withNull.longitude, null);
+  assert.equal(fuzzPersonCoords("checkins", null), null);
 });

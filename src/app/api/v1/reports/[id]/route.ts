@@ -10,6 +10,7 @@ import {
   VIEW_COLUMNS,
   VIEW_FOR_TABLE,
   typeForResource,
+  fuzzPersonCoords,
 } from "@/lib/reports.mjs";
 import {
   requireJsonContentType,
@@ -54,8 +55,13 @@ function projectPublic(table: string, row: Record<string, unknown>): Record<stri
   const viewFor = VIEW_FOR_TABLE as Record<string, string>;
   const colsByView = VIEW_COLUMNS as Record<string, string[]>;
   const cols = colsByView[viewFor[table]] ?? [];
+  // El RPC patch_report devuelve la fila base CRUDA con lat/lng EXACTAS. Para
+  // tablas de personas, redondear igual que la vista pública (B3) ANTES de
+  // proyectar: si no, un socio con scope write leería la coord precisa de un
+  // missing_person/checkin saltándose la vista fuzzeada. Edificios = exacto.
+  const fuzzed = fuzzPersonCoords(table, row) as Record<string, unknown>;
   const out: Record<string, unknown> = { type: typeForResource(table, row) };
-  for (const c of cols) out[c] = row[c] ?? null;
+  for (const c of cols) out[c] = fuzzed[c] ?? null;
   return out;
 }
 
