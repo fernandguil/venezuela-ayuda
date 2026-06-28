@@ -149,9 +149,11 @@ const CREATE_TABLE_RE = new RegExp(
 // table. `into` must not be preceded by `insert` (INSERT ... has no INTO-table
 // semantics that create relations) — `select ... into` is the only CTAS-like
 // form here. We anchor on `\bselect\b ... \binto\b` to avoid matching unrelated
-// `into` keywords.
+// `into` keywords. The gap uses `[^;]` (not `[\s\S]`) so a match never crosses a
+// statement boundary: a `select` without its own `into` can't reach into a later
+// statement's `into` and produce a false positive.
 const SELECT_INTO_RE = new RegExp(
-  `\\bselect\\b[\\s\\S]*?\\binto\\s+(?:(?:temp|temporary|unlogged)\\s+)?(${IDENT})`,
+  `\\bselect\\b[^;]*?\\binto\\s+(?:(?:temp|temporary|unlogged)\\s+)?(${IDENT})`,
   "gi",
 );
 

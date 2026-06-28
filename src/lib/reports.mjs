@@ -54,7 +54,9 @@ export const PERSON_COORD_TABLES = new Set(["checkins", "help_requests", "help_o
 export const COORD_FIELDS = ["latitude", "longitude"];
 
 // Redondea un valor de coordenada a COORD_DP decimales conservando el tipo
-// number (float8 en el wire). Pasa null/undefined/no-numérico sin tocar.
+// number (float8 en el wire). Devuelve SIN TOCAR los valores no aptos: null,
+// undefined, no-numéricos y los number no finitos (NaN, ±Infinity) — estos
+// últimos los filtra Number.isFinite, así que nunca se redondean.
 export function roundCoord(value) {
   if (typeof value !== "number" || !Number.isFinite(value)) return value;
   const f = 10 ** COORD_DP;
