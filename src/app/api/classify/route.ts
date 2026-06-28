@@ -76,6 +76,7 @@ export async function POST(req: Request) {
       {
         model: process.env.OPENAI_MODEL || "gpt-4o-mini",
         temperature: 0,
+        max_tokens: 200,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: SYSTEM },
