@@ -506,8 +506,9 @@ export async function removeFrIndex(
   if (!UUID_RE.test(id) || !token) return { ok: false, error: "No autorizado." };
   if (!(await verifyManageToken("checkins", id, token)))
     return { ok: false, error: "No autorizado." };
-  // Best-effort: delete from the FR index. A 404 (never indexed or already removed)
-  // is treated as success inside frDeletePerson — the outcome is the same.
+  // Delete first, then patch: if the patch fails, fr_consent stays true but
+  // the person is already removed from the FR index (safe end-state). A retry
+  // is safe because frDeletePerson treats 404 as success (idempotent).
   await frDeletePerson(id);
   try {
     const supabase = getServerSupabase();
