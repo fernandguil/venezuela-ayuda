@@ -26,8 +26,16 @@ const nextConfig: NextConfig = {
   },
   images: {
     remotePatterns: [
-      // Public Supabase Storage (check-in / missing-person photos).
-      { protocol: "https", hostname: "*.supabase.co", pathname: "/storage/v1/object/public/**" },
+      // Supabase Storage photos. We pin to the exact project host from the env
+      // var to avoid serving/optimizing images from any supabase.co project.
+      // Covers both public (/object/public/) and signed (/object/sign/) paths.
+      {
+        protocol: "https",
+        hostname: process.env.NEXT_PUBLIC_SUPABASE_URL
+          ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname
+          : "*.supabase.co", // fallback for local dev without env
+        pathname: "/storage/v1/object/**",
+      },
     ],
   },
   // Security headers que Vercel NO pone automático. HTTPS-redirect (308) y HSTS

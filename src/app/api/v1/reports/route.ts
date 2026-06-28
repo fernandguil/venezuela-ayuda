@@ -140,6 +140,18 @@ export async function POST(req: Request) {
   }
   const source = partner.source;
 
+  // Content-Type y tamaño antes del rate-limit: requests malformados no consumen
+  // el cupo legítimo del socio.
+  if (!requireJsonContentType(req.headers.get("content-type"))) {
+    return NextResponse.json(
+      errorBody("Content-Type debe ser application/json.", requestId),
+      { status: 415, headers: rid }
+    );
+  }
+  if (Number(req.headers.get("content-length") || 0) > MAX_BODY_BYTES) {
+    return NextResponse.json(errorBody("Payload demasiado grande.", requestId), { status: 413, headers: rid });
+  }
+
   // Rate-limit best-effort por socio (por-lambda; el tope de batch es el backstop real).
   const rl = await rateLimit(`reports:write:${source}`, { limit: 120, windowSec: 60 });
   if (!rl.ok) {
@@ -147,19 +159,6 @@ export async function POST(req: Request) {
       errorBody("Demasiadas solicitudes.", requestId),
       { status: 429, headers: { ...rid, "Retry-After": String(rl.retryAfterSec) } }
     );
-  }
-
-  // Content-Type debe ser JSON (415 si no) — antes de buffersear el body.
-  if (!requireJsonContentType(req.headers.get("content-type"))) {
-    return NextResponse.json(
-      errorBody("Content-Type debe ser application/json.", requestId),
-      { status: 415, headers: rid }
-    );
-  }
-
-  // Guard de tamaño antes de parsear (el body se bufferea entero en memoria).
-  if (Number(req.headers.get("content-length") || 0) > MAX_BODY_BYTES) {
-    return NextResponse.json(errorBody("Payload demasiado grande.", requestId), { status: 413, headers: rid });
   }
 
   let reports: unknown;
