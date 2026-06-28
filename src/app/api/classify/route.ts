@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
 import { requireJsonContentType } from "@/lib/apiPolicy.mjs";
+import { readBodyUpTo } from "@/lib/bodyStream.mjs";
 import { classifyHeuristic, type Classification } from "@/lib/classifyHeuristic";
 import { HELP_CATEGORIES, URGENCY_LEVELS } from "@/lib/constants";
 import { logWarn, logDebug } from "@/lib/log.mjs";
@@ -63,31 +64,19 @@ export async function POST(req: Request) {
 
   // Stream body with a hard byte cap before JSON parse so an oversized request
   // cannot buffer in memory even when content-length is absent or falsified.
+  const bodyResult = await readBodyUpTo(req.body, MAX_BODY_BYTES);
+  if ("overflow" in bodyResult)
+    return NextResponse.json({ error: "Cuerpo demasiado grande." }, { status: 413 });
+  if ("error" in bodyResult) {
+    logDebug("classify_bad_json", { scope: "api.classify.POST" });
+    return NextResponse.json({ error: "Cuerpo inválido." }, { status: 400 });
+  }
   let text = "";
   try {
-    const reader = req.body?.getReader();
-    if (reader) {
-      const chunks: Uint8Array[] = [];
-      let total = 0;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        total += value.byteLength;
-        if (total > MAX_BODY_BYTES) {
-          await reader.cancel();
-          return NextResponse.json({ error: "Cuerpo demasiado grande." }, { status: 413 });
-        }
-        chunks.push(value);
-      }
-      reader.releaseLock();
-      const buf = new Uint8Array(total);
-      let pos = 0;
-      for (const c of chunks) { buf.set(c, pos); pos += c.byteLength; }
-      const parsed = JSON.parse(new TextDecoder().decode(buf));
-      text = String(parsed?.text ?? "").slice(0, 1000).trim();
-    }
-  } catch {
     // El texto libre puede contener PII → jamás se loguea; sólo el evento.
+    const parsed = JSON.parse(bodyResult.text);
+    text = String(parsed?.text ?? "").slice(0, 1000).trim();
+  } catch {
     logDebug("classify_bad_json", { scope: "api.classify.POST" });
     return NextResponse.json({ error: "Cuerpo inválido." }, { status: 400 });
   }

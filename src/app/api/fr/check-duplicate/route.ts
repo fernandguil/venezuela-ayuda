@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
 import { requireJsonContentType } from "@/lib/apiPolicy.mjs";
+import { readBodyUpTo } from "@/lib/bodyStream.mjs";
 import { FR_BASE, frHeaders, frConfigured } from "@/lib/fr";
 import { logWarn, logDebug } from "@/lib/log.mjs";
 
@@ -28,33 +29,20 @@ export async function POST(req: Request) {
   const rl = await rateLimit(await clientKey("fr-check"), { limit: 30, windowSec: 60 });
   if (!rl.ok) return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
 
+  // Stream body with a hard byte cap — photo data URL can be up to ~256 KB.
+  const bodyResult = await readBodyUpTo(req.body, MAX_BODY_BYTES);
+  if ("overflow" in bodyResult) {
+    logDebug("fr_check_oversized", { scope: "api.fr.check-duplicate" });
+    return NextResponse.json({ ok: true, possible_duplicate: false });
+  }
   let photo = "";
-  try {
-    const reader = req.body?.getReader();
-    if (reader) {
-      const chunks: Uint8Array[] = [];
-      let total = 0;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        total += value.byteLength;
-        if (total > MAX_BODY_BYTES) {
-          await reader.cancel();
-          return NextResponse.json({ ok: true, possible_duplicate: false });
-        }
-        chunks.push(value);
-      }
-      reader.releaseLock();
-      const buf = new Uint8Array(total);
-      let pos = 0;
-      for (const c of chunks) { buf.set(c, pos); pos += c.byteLength; }
+  if ("text" in bodyResult && bodyResult.text) {
+    try {
       // Photo is PII — never log the body, only the event on failure.
-      photo = (JSON.parse(new TextDecoder().decode(buf)))?.photo || "";
+      photo = (JSON.parse(bodyResult.text))?.photo || "";
+    } catch {
+      logDebug("fr_check_bad_json", { scope: "api.fr.check-duplicate" });
     }
-  } catch {
-    // Body malformado = error del cliente. Sólo en debug y SIN el body (la foto
-    // es PII): no amplificamos logs con requests basura, pero queda traza opcional.
-    logDebug("fr_check_bad_json", { scope: "api.fr.check-duplicate" });
   }
   const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(photo);
   if (!m) return NextResponse.json({ ok: true, possible_duplicate: false });
