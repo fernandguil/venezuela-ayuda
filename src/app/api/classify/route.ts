@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { rateLimit, clientKey } from "@/lib/rateLimit";
+import { requireJsonContentType } from "@/lib/apiPolicy.mjs";
 import { classifyHeuristic, type Classification } from "@/lib/classifyHeuristic";
 import { HELP_CATEGORIES, URGENCY_LEVELS } from "@/lib/constants";
 import { logWarn, logDebug } from "@/lib/log.mjs";
@@ -41,7 +42,17 @@ function sanitize(input: unknown, fallback: Classification): Classification {
   return { category, urgency, keywords, location, source: "ai" };
 }
 
+// 16 KB cap: free text capped at 1 000 chars after parse; this prevents
+// buffering a multi-MB body before that slice runs.
+const MAX_BODY_BYTES = 16 * 1024;
+
 export async function POST(req: Request) {
+  // Content-Type check before rate-limit: wrong media type is cheap to reject
+  // and must not consume the caller's rate-limit budget.
+  if (!requireJsonContentType(req.headers.get("content-type"))) {
+    return NextResponse.json({ error: "Content-Type debe ser application/json." }, { status: 415 });
+  }
+
   const limited = await rateLimit(await clientKey("classify"), { limit: 20, windowSec: 60 });
   if (!limited.ok) {
     return NextResponse.json(
@@ -50,10 +61,31 @@ export async function POST(req: Request) {
     );
   }
 
+  // Stream body with a hard byte cap before JSON parse so an oversized request
+  // cannot buffer in memory even when content-length is absent or falsified.
   let text = "";
   try {
-    const body = await req.json();
-    text = String(body?.text ?? "").slice(0, 1000).trim();
+    const reader = req.body?.getReader();
+    if (reader) {
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > MAX_BODY_BYTES) {
+          await reader.cancel();
+          return NextResponse.json({ error: "Cuerpo demasiado grande." }, { status: 413 });
+        }
+        chunks.push(value);
+      }
+      reader.releaseLock();
+      const buf = new Uint8Array(total);
+      let pos = 0;
+      for (const c of chunks) { buf.set(c, pos); pos += c.byteLength; }
+      const parsed = JSON.parse(new TextDecoder().decode(buf));
+      text = String(parsed?.text ?? "").slice(0, 1000).trim();
+    }
   } catch {
     // El texto libre puede contener PII → jamás se loguea; sólo el evento.
     logDebug("classify_bad_json", { scope: "api.classify.POST" });
