@@ -19,6 +19,7 @@ import {
 } from "@/lib/apiPolicy.mjs";
 import type { Json } from "@/types/database.types.gen";
 import { logError, logDebug } from "@/lib/log.mjs";
+import { readBodyUpTo } from "@/lib/bodyStream.mjs";
 
 // /api/v1/reports/{id} — un reporte por su id global (uuid).
 //
@@ -35,39 +36,6 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 const MAX_PATCH_BODY_BYTES = 64 * 1024;
-
-// Read the request body stream up to maxBytes. Returns { text } on success,
-// { overflow } if the cap is exceeded, or { error } on stream/decode failure.
-async function readBodyUpTo(
-  body: ReadableStream<Uint8Array> | null,
-  maxBytes: number,
-): Promise<{ text: string } | { overflow: true } | { error: true }> {
-  if (!body) return { text: "" };
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > maxBytes) return { overflow: true };
-      chunks.push(value);
-    }
-  } catch {
-    return { error: true };
-  } finally {
-    reader.releaseLock();
-  }
-  const combined = new Uint8Array(total);
-  let pos = 0;
-  for (const c of chunks) { combined.set(c, pos); pos += c.byteLength; }
-  try {
-    return { text: new TextDecoder().decode(combined) };
-  } catch {
-    return { error: true };
-  }
-}
 
 type Params = { params: Promise<{ id: string }> };
 type ReportTable = "checkins" | "help_requests" | "help_offers" | "damaged_reports";
