@@ -1,6 +1,7 @@
 import "server-only";
 import { getServerSupabase, isSupabaseConfigured, hasSecretKey } from "@/lib/supabase/server";
 import { logWarn } from "@/lib/log.mjs";
+import { mergeSignedUrls as _mergeSignedUrls } from "@/lib/storageUtils.mjs";
 
 const BUCKET = "checkin-photos";
 const SIGNED_URL_TTL = 60 * 60; // 1 hour
@@ -46,10 +47,5 @@ export async function signedPhotoUrls(
     .from(BUCKET)
     .createSignedUrls(toSign, SIGNED_URL_TTL);
   if (error || !data) return paths.map(() => null);
-  const signed = new Map(data.map((d): [string, string | null] => [d.path, d.signedUrl ?? null]));
-  return paths.map((p) => {
-    if (!p) return null;
-    if (p.startsWith("http")) return p;
-    return signed.get(p) ?? null;
-  });
+  return _mergeSignedUrls(paths, data);
 }
