@@ -143,10 +143,12 @@ export async function submitCheckin(
     );
     if (error) throw error;
 
-    // Indexa la foto en el FR-API (asistivo, best-effort) para permitir dedup y
-    // conciliación por rostro entre plataformas. Nunca bloquea ni lanza, y no
-    // envía datos privados (el teléfono queda fuera).
-    if (photoUrl) {
+    // Indexa la foto en el FR-API (asistivo, best-effort). LOOKING_FOR_SOMEONE
+    // significa que el usuario está reportando a un TERCERO — nunca indexar esa
+    // foto sin el consentimiento del titular (refs #99). Para SAFE / NEEDS_HELP
+    // la persona sube su propia foto; el checkbox de consentimiento explícito va
+    // en PR #34 (next step).
+    if (photoUrl && status !== "LOOKING_FOR_SOMEONE") {
       await frIndexPerson({
         externalId: id,
         imageUrl: photoUrl,
