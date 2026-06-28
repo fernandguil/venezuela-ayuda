@@ -20,7 +20,7 @@ export async function GET(req: Request) {
   try {
     const r = await fetch(
       `${FR_BASE}/v1/duplicates?source=${encodeURIComponent(FR_SOURCE)}&min_score=${min}&limit=${limit}`,
-      { headers: frHeaders() },
+      { headers: frHeaders(), redirect: "error" },
     );
     return new NextResponse(await r.text(), {
       status: r.status,

@@ -36,6 +36,7 @@ export async function POST(req: Request) {
       method: "POST",
       headers: frHeaders(),
       body: fd,
+      redirect: "error",
     });
     if (r.status === 422)
       return NextResponse.json({ ok: true, possible_duplicate: false, no_face: true });

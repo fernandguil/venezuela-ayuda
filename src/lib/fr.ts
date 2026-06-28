@@ -44,6 +44,7 @@ export async function frIndexPerson(p: {
       headers: frHeaders(),
       body: fd,
       signal: ctrl.signal,
+      redirect: "error", // Never follow redirects — prevents credential leak if FR-API is compromised
     });
     // fetch NO lanza en 401/500: un FR caído o una key inválida devuelve un
     // res no-ok que, sin este chequeo, dejaría la persona sin indexar en silencio.

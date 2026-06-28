@@ -21,7 +21,7 @@ export async function GET(req: Request) {
   const qs = new URLSearchParams({ min_score: min, limit });
   if (sources) qs.set("sources", sources);
   try {
-    const r = await fetch(`${FR_BASE}/v1/reconcile?${qs.toString()}`, { headers: frHeaders() });
+    const r = await fetch(`${FR_BASE}/v1/reconcile?${qs.toString()}`, { headers: frHeaders(), redirect: "error" });
     return new NextResponse(await r.text(), {
       status: r.status,
       headers: { "content-type": "application/json" },

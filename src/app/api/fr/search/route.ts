@@ -21,7 +21,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "falta_imagen" }, { status: 400 });
     const fd = new FormData();
     fd.append("file", file, "foto.jpg");
-    const r = await fetch(`${FR_BASE}/v1/search`, { method: "POST", headers: frHeaders(), body: fd });
+    const r = await fetch(`${FR_BASE}/v1/search`, { method: "POST", headers: frHeaders(), body: fd, redirect: "error" });
     return new NextResponse(await r.text(), {
       status: r.status,
       headers: { "content-type": "application/json" },
