@@ -26,22 +26,37 @@ export async function POST(req: Request) {
     return new NextResponse(null, { status: 204 });
   }
 
+  // Content-Type check before rate-limit: invalid media type must not consume
+  // the caller's rate-limit budget.
+  if (!requireJsonContentType(req.headers.get("content-type"))) {
+    return new NextResponse(null, { status: 204 });
+  }
+
   const rl = await rateLimit(await clientKey("client-error"), { limit: 30, windowSec: 60 });
   if (!rl.ok) {
     // 204: el cliente no debe reintentar ni mostrar nada; es telemetría best-effort.
     return new NextResponse(null, { status: 204 });
   }
 
-  if (!requireJsonContentType(req.headers.get("content-type"))) {
-    return new NextResponse(null, { status: 204 });
-  }
-  if (Number(req.headers.get("content-length") || 0) > MAX_BODY_BYTES) {
-    return new NextResponse(null, { status: 204 });
-  }
-
+  // Stream body with a hard byte cap; content-length is client-controlled.
   let body: { digest?: unknown };
   try {
-    body = (await req.json()) as { digest?: unknown };
+    const reader = req.body?.getReader();
+    if (!reader) return new NextResponse(null, { status: 204 });
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_BODY_BYTES) { await reader.cancel(); return new NextResponse(null, { status: 204 }); }
+      chunks.push(value);
+    }
+    reader.releaseLock();
+    const buf = new Uint8Array(total);
+    let pos = 0;
+    for (const c of chunks) { buf.set(c, pos); pos += c.byteLength; }
+    body = JSON.parse(new TextDecoder().decode(buf)) as { digest?: unknown };
   } catch {
     return new NextResponse(null, { status: 204 });
   }
