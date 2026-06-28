@@ -77,6 +77,71 @@ test("checkins: contact/phone_private/manage_token nunca aparecen", () => {
   assert.equal("manage_token" in ev.changes, false);
 });
 
+// B3: el /history es ANÓNIMO (sin API key). Los snapshots before/after del
+// audit_log son CRUDOS (coord exacta). Estas pruebas blindan que ningún evento
+// emita lat/lng de personas con más de 3 decimales.
+function countDecimals(n) {
+  if (typeof n !== "number" || !Number.isFinite(n)) return 0;
+  const s = String(n);
+  const i = s.indexOf(".");
+  return i === -1 ? 0 : s.length - i - 1;
+}
+
+test("B3 history: CREATE de help_request redondea lat/lng a 3 decimales", () => {
+  const exact = { ...before, latitude: 10.123456, longitude: -66.987654 };
+  const ev = projectHistoryEvent(
+    { action: "CREATE", occurred_at: "t", source: "cruzroja.org", before: null, after: exact },
+    "help_requests"
+  );
+  assert.equal(ev.changes.latitude.to, 10.123);
+  assert.equal(ev.changes.longitude.to, -66.988);
+  assert.ok(countDecimals(ev.changes.latitude.to) <= 3);
+  assert.ok(countDecimals(ev.changes.longitude.to) <= 3);
+});
+
+test("B3 history: cambio de coord sub-3-decimales NO aparece como edición", () => {
+  const after = { ...before, latitude: 10.5004, longitude: -66.9001 };
+  const ev = projectHistoryEvent(
+    { action: "UPDATE", occurred_at: "t", source: "s", before, after },
+    "help_requests"
+  );
+  // before.latitude=10.5, after=10.5004 → ambos redondean a 10.5 → sin cambio.
+  assert.equal("latitude" in ev.changes, false);
+  assert.equal("longitude" in ev.changes, false);
+});
+
+test("B3 history: checkins también redondea (from y to)", () => {
+  const cBefore = { id: "1", name: "Ana", status: "LOOKING_FOR_SOMEONE", latitude: 10.111111, longitude: -66.222222, message: "x", created_at: "t" };
+  const cAfter = { ...cBefore, latitude: 10.999999, longitude: -66.888888 };
+  const ev = projectHistoryEvent({ action: "UPDATE", occurred_at: "t", source: "s", before: cBefore, after: cAfter }, "checkins");
+  assert.deepEqual(ev.changes.latitude, { from: 10.111, to: 11 });
+  assert.deepEqual(ev.changes.longitude, { from: -66.222, to: -66.889 });
+});
+
+test("B3 history: NINGÚN evento expone coord con >3 decimales (tablas de personas)", () => {
+  const cases = [
+    ["help_requests", { ...before, latitude: 10.1234567, longitude: -66.7654321 }],
+    ["checkins", { id: "1", name: "x", status: "SAFE", latitude: 8.99999, longitude: -70.00001, created_at: "t" }],
+    ["help_offers", { id: "2", category: "food", latitude: 9.123456, longitude: -67.654321, created_at: "t" }],
+  ];
+  for (const [table, after] of cases) {
+    const ev = projectHistoryEvent({ action: "CREATE", occurred_at: "t", source: "s", before: null, after }, table);
+    for (const f of ["latitude", "longitude"]) {
+      if (f in ev.changes) {
+        assert.ok(countDecimals(ev.changes[f].to) <= 3, `${table}.${f}.to debe tener <=3 decimales`);
+        assert.ok(countDecimals(ev.changes[f].from) <= 3, `${table}.${f}.from debe tener <=3 decimales`);
+      }
+    }
+  }
+});
+
+test("B3 history: edificios (damaged_reports) NO se redondean (coord exacta)", () => {
+  const dBefore = { id: "d1", place_name: "Puente", severity: "HIGH", latitude: 10.123456, longitude: -66.987654, status: "OPEN", created_at: "t" };
+  const ev = projectHistoryEvent({ action: "CREATE", occurred_at: "t", source: "s", before: null, after: dBefore }, "damaged_reports");
+  assert.equal(ev.changes.latitude.to, 10.123456);
+  assert.equal(ev.changes.longitude.to, -66.987654);
+});
+
 test("projectHistory mapea una lista de eventos preservando orden", () => {
   const evs = projectHistory(
     [

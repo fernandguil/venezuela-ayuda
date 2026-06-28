@@ -7,7 +7,7 @@
 // VIEW_COLUMNS), así que PII (phone_private/contact/manage_token/risk_answers) y
 // forense (ip/user_agent) jamás pueden filtrarse: no están en la whitelist.
 
-import { VIEW_COLUMNS, VIEW_FOR_TABLE } from "./reports.mjs";
+import { VIEW_COLUMNS, VIEW_FOR_TABLE, PERSON_COORD_TABLES, COORD_FIELDS, roundCoord } from "./reports.mjs";
 
 // Campos que NUNCA se exponen en el history, ni como cambio ni como metadata. La
 // proyección los excluye por construcción (no están en VIEW_COLUMNS); este set es
@@ -32,6 +32,17 @@ function publicFields(table) {
   return cols.filter((c) => !META_FIELDS.has(c));
 }
 
+// Conjunto de campos-coordenada, para test O(1).
+const COORD_FIELD_SET = new Set(COORD_FIELDS);
+
+// ¿Hay que redondear este campo de esta tabla? Solo lat/lng de tablas de
+// personas (B3). Los snapshots before/after del audit_log son CRUDOS (coord
+// exacta); sin esto, el /history público (sin API key) filtraría la ubicación
+// precisa de un desaparecido vía changes.latitude.to. Edificios = exacto.
+function isFuzzedCoordField(table, field) {
+  return PERSON_COORD_TABLES.has(table) && COORD_FIELD_SET.has(field);
+}
+
 // Igualdad estructural barata (cubre primitivos y jsonb como items[]).
 function eq(a, b) {
   if (a === b) return true;
@@ -47,8 +58,15 @@ export function projectHistoryEvent(event, table) {
   const after = event.after ?? {};
   const changes = {};
   for (const f of publicFields(table)) {
-    const from = before == null ? null : (before[f] ?? null);
-    const to = after[f] ?? null;
+    let from = before == null ? null : (before[f] ?? null);
+    let to = after[f] ?? null;
+    // B3: redondear lat/lng de personas igual que la vista pública. Se compara
+    // y se emite el valor ya redondeado, así el /history nunca filtra la coord
+    // exacta y un cambio sub-3-decimales no aparece como "edición" espuria.
+    if (isFuzzedCoordField(table, f)) {
+      from = roundCoord(from);
+      to = roundCoord(to);
+    }
     if (!eq(from, to)) changes[f] = { from, to };
   }
   return {

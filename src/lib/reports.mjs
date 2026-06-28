@@ -33,6 +33,47 @@ export const VIEW_COLUMNS = {
 export const DEFAULT_LIMIT = 100;
 export const MAX_LIMIT = 500;
 
+// ── Generalización (fuzz) de coordenadas de personas (B3) ───────────────────
+// Las vistas public_checkins / public_help_requests / public_help_offers
+// redondean lat/lng a COORD_DP decimales (migración 202606280003) para no
+// filtrar la ubicación EXACTA de una persona (desaparecido, hogar en riesgo,
+// alguien ofreciendo ayuda desde su casa). Edificios (damaged_reports) quedan
+// EXACTOS: son infraestructura, no personas.
+//
+// Estas constantes/funciones son la FUENTE ÚNICA del redondeo del lado app,
+// para las rutas que NO pasan por la vista fuzzeada: el /history (audit.mjs lee
+// snapshots crudos del audit_log) y el PATCH (el RPC patch_report devuelve la
+// fila base cruda). Mantienen el mismo nº de decimales que la vista SQL.
+export const COORD_DP = 3;
+
+// Tablas cuyas coordenadas pertenecen a PERSONAS → se redondean. damaged_reports
+// queda fuera a propósito (edificios = exacto).
+export const PERSON_COORD_TABLES = new Set(["checkins", "help_requests", "help_offers"]);
+
+// Campos de coordenada a redondear.
+export const COORD_FIELDS = ["latitude", "longitude"];
+
+// Redondea un valor de coordenada a COORD_DP decimales conservando el tipo
+// number (float8 en el wire). Devuelve SIN TOCAR los valores no aptos: null,
+// undefined, no-numéricos y los number no finitos (NaN, ±Infinity) — estos
+// últimos los filtra Number.isFinite, así que nunca se redondean.
+export function roundCoord(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return value;
+  const f = 10 ** COORD_DP;
+  return Math.round(value * f) / f;
+}
+
+// Devuelve una copia de `row` con lat/lng redondeadas SI `table` es de personas.
+// No muta el original. Tablas de edificios y filas sin coords se devuelven igual.
+export function fuzzPersonCoords(table, row) {
+  if (!row || typeof row !== "object" || !PERSON_COORD_TABLES.has(table)) return row;
+  const out = { ...row };
+  for (const f of COORD_FIELDS) {
+    if (f in out) out[f] = roundCoord(out[f]);
+  }
+  return out;
+}
+
 // type → { ok, view, status?, select } | { ok:false }. select es el string para
 // PostgREST (columnas explícitas, csv).
 export function resolveType(type) {
