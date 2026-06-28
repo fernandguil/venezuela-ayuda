@@ -4,8 +4,16 @@ import { redirect } from "next/navigation";
 import { getAuthClient } from "@/lib/supabase/auth";
 import { getServerSupabase, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getReviewer, isEmailReviewer } from "@/lib/reviewer";
+import { clientKey } from "@/lib/rateLimit";
 
 export type AuthState = { error?: string };
+
+// Shares the same durable login throttle (migration 0021) used by /admin.
+const LOGIN_LIMIT = { p_limit: 8, p_window_sec: 900, p_lockout_sec: 900 } as const;
+
+function lockedMsg(seconds: number) {
+  return `Demasiados intentos fallidos. Intenta de nuevo en ${Math.ceil(seconds / 60)} min.`;
+}
 
 // How long a claim stays valid without a heartbeat. The console renews well
 // before this (see HEARTBEAT_MS in the client), so a live tab keeps its lock;
@@ -50,14 +58,24 @@ export async function reviewerSignIn(
   const password = String(form.get("password") || "");
   if (!email || !password) return { error: "Escribe tu correo y contraseña." };
 
+  const svc = getServerSupabase();
+  const key = await clientKey("login");
+  const { data: lockedFor } = await svc.rpc("login_guard", { p_key: key });
+  if (typeof lockedFor === "number" && lockedFor > 0) return { error: lockedMsg(lockedFor) };
+
   const auth = await getAuthClient();
   const { error } = await auth.auth.signInWithPassword({ email, password });
-  if (error) return { error: "Correo o contraseña incorrectos." };
+  if (error) {
+    await svc.rpc("login_record_failure", { p_key: key, ...LOGIN_LIMIT });
+    return { error: "Correo o contraseña incorrectos." };
+  }
 
   if (!(await isEmailReviewer(email))) {
     await auth.auth.signOut();
+    await svc.rpc("login_record_failure", { p_key: key, ...LOGIN_LIMIT });
     return { error: "Esta cuenta no tiene acceso de revisión." };
   }
+  await svc.rpc("login_clear", { p_key: key });
   redirect("/deduplicar");
 }
 
@@ -72,26 +90,53 @@ export async function reviewerSignUp(
   const password = String(form.get("password") || "");
   if (!email || password.length < 8)
     return { error: "Usa una contraseña de al menos 8 caracteres." };
-  if (!(await isEmailReviewer(email)))
-    return { error: "Este correo no está autorizado para revisar." };
 
   const svc = getServerSupabase();
+  const key = await clientKey("login");
+  const { data: lockedFor } = await svc.rpc("login_guard", { p_key: key });
+  if (typeof lockedFor === "number" && lockedFor > 0) return { error: lockedMsg(lockedFor) };
+
+  // Neutral error: does not reveal whether the email is on the reviewer allowlist.
+  const GENERIC = "No se pudo crear la cuenta. Verifica los datos o contacta a un administrador.";
+
+  // Timing floor started here: both the authorized and unauthorized paths spend at
+  // least SIGNUP_FLOOR_MS ms past this point, hiding whether the allowlist check
+  // passed from timing-based enumeration.
+  const SIGNUP_FLOOR_MS = 600;
+  const deadline = Date.now() + SIGNUP_FLOOR_MS;
+  const floor = () => {
+    const ms = deadline - Date.now();
+    return ms > 0 ? new Promise<void>((r) => setTimeout(r, ms)) : Promise.resolve();
+  };
+
+  if (!(await isEmailReviewer(email))) {
+    await svc.rpc("login_record_failure", { p_key: key, ...LOGIN_LIMIT });
+    await floor();
+    return { error: GENERIC };
+  }
+
   const { error: createErr } = await svc.auth.admin.createUser({
     email,
     password,
     email_confirm: true,
   });
-  if (createErr && !/already|registered|exists/i.test(createErr.message))
-    return { error: "No se pudo crear la cuenta. Intenta de nuevo." };
+  if (createErr && !/already|registered|exists/i.test(createErr.message)) {
+    await floor();
+    return { error: GENERIC };
+  }
 
   const auth = await getAuthClient();
   const { error: signErr } = await auth.auth.signInWithPassword({ email, password });
-  if (signErr)
+  if (signErr) {
+    await floor();
     return {
       error: createErr
         ? "Ese correo ya tiene una cuenta. Usa Iniciar sesión."
-        : "No se pudo iniciar sesión. Intenta de nuevo.",
+        : GENERIC,
     };
+  }
+  await svc.rpc("login_clear", { p_key: key });
+  await floor();
   redirect("/deduplicar");
 }
 
