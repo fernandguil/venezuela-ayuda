@@ -41,7 +41,32 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 const MAX_BATCH = 200;
-const MAX_BODY_BYTES = 512 * 1024; // req.json() bufferea todo el body antes del cap de batch
+const MAX_BODY_BYTES = 512 * 1024;
+
+// Reads the request stream up to maxBytes, returning null if exceeded.
+// The content-length header can be falsified; this enforces a hard cap on
+// actual bytes received regardless of what the client declares.
+async function readBodyWithCap(req: Request, maxBytes: number): Promise<string | null> {
+  const reader = req.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) { await reader.cancel(); return null; }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const buf = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { buf.set(chunk, offset); offset += chunk.byteLength; }
+  return new TextDecoder().decode(buf);
+}
 
 export async function GET(req: Request) {
   // Rate-limit best-effort por IP (lectura abierta; el límite blunt-ea abuso).
@@ -161,14 +186,17 @@ export async function POST(req: Request) {
     );
   }
 
+  // Stream-cap: rejects oversized bodies even when content-length is falsified.
+  const rawBody = await readBodyWithCap(req, MAX_BODY_BYTES);
+  if (rawBody === null) {
+    return NextResponse.json(errorBody("Payload demasiado grande.", requestId), { status: 413, headers: rid });
+  }
+
   let reports: unknown;
   try {
-    reports = ((await req.json()) as { reports?: unknown })?.reports;
-  } catch (err) {
-    // Body malformado = error del cliente (400, no silencioso). Sólo en debug
-    // para no dar amplificación de logs a requests basura.
+    reports = (JSON.parse(rawBody) as { reports?: unknown })?.reports;
+  } catch {
     logDebug("reports_bad_json", { scope: "api.reports.POST", request_id: requestId });
-    void err;
     return NextResponse.json(errorBody("Cuerpo JSON inválido.", requestId), { status: 400, headers: rid });
   }
   if (!Array.isArray(reports)) {
