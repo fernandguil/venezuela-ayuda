@@ -41,7 +41,7 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 const MAX_BATCH = 200;
-const MAX_BODY_BYTES = 512 * 1024; // req.json() bufferea todo el body antes del cap de batch
+const MAX_BODY_BYTES = 512 * 1024;
 
 export async function GET(req: Request) {
   // Rate-limit best-effort por IP (lectura abierta; el límite blunt-ea abuso).
@@ -109,6 +109,40 @@ export async function GET(req: Request) {
   );
 }
 
+// Read a Request body stream up to maxBytes. Stops early if the cap is exceeded
+// so oversized payloads never fully buffer. Returns { text } on success,
+// { overflow } if the limit is hit, or { error } on stream/decode failure.
+async function readBodyUpTo(
+  body: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+): Promise<{ text: string } | { overflow: true } | { error: true }> {
+  if (!body) return { text: "" };
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) return { overflow: true };
+      chunks.push(value);
+    }
+  } catch {
+    return { error: true };
+  } finally {
+    reader.releaseLock();
+  }
+  const combined = new Uint8Array(total);
+  let pos = 0;
+  for (const c of chunks) { combined.set(c, pos); pos += c.byteLength; }
+  try {
+    return { text: new TextDecoder().decode(combined) };
+  } catch {
+    return { error: true };
+  }
+}
+
 type IngestStatus = "upserted" | "rejected" | "error";
 type IngestResult = { external_id: string | null; status: IngestStatus; error?: string; report_id?: string };
 // buildRow es JS (.mjs); tipamos su retorno acá para que el narrowing por `ok` funcione.
@@ -140,6 +174,15 @@ export async function POST(req: Request) {
   }
   const source = partner.source;
 
+  // Content-Type check BEFORE rate-limit: wrong media type is cheap to reject
+  // and must not consume the partner's rate-limit budget.
+  if (!requireJsonContentType(req.headers.get("content-type"))) {
+    return NextResponse.json(
+      errorBody("Content-Type debe ser application/json.", requestId),
+      { status: 415, headers: rid }
+    );
+  }
+
   // Rate-limit best-effort por socio (por-lambda; el tope de batch es el backstop real).
   const rl = await rateLimit(`reports:write:${source}`, { limit: 120, windowSec: 60 });
   if (!rl.ok) {
@@ -149,27 +192,22 @@ export async function POST(req: Request) {
     );
   }
 
-  // Content-Type debe ser JSON (415 si no) — antes de buffersear el body.
-  if (!requireJsonContentType(req.headers.get("content-type"))) {
-    return NextResponse.json(
-      errorBody("Content-Type debe ser application/json.", requestId),
-      { status: 415, headers: rid }
-    );
-  }
-
-  // Guard de tamaño antes de parsear (el body se bufferea entero en memoria).
-  if (Number(req.headers.get("content-length") || 0) > MAX_BODY_BYTES) {
+  // Stream body with a hard byte cap. content-length is client-controlled and
+  // cannot be trusted for enforcement; we count actual bytes from the stream.
+  const read = await readBodyUpTo(req.body, MAX_BODY_BYTES);
+  if ("overflow" in read) {
     return NextResponse.json(errorBody("Payload demasiado grande.", requestId), { status: 413, headers: rid });
+  }
+  if ("error" in read) {
+    logDebug("reports_bad_json", { scope: "api.reports.POST", request_id: requestId });
+    return NextResponse.json(errorBody("Cuerpo JSON inválido.", requestId), { status: 400, headers: rid });
   }
 
   let reports: unknown;
   try {
-    reports = ((await req.json()) as { reports?: unknown })?.reports;
-  } catch (err) {
-    // Body malformado = error del cliente (400, no silencioso). Sólo en debug
-    // para no dar amplificación de logs a requests basura.
+    reports = (JSON.parse(read.text) as { reports?: unknown })?.reports;
+  } catch {
     logDebug("reports_bad_json", { scope: "api.reports.POST", request_id: requestId });
-    void err;
     return NextResponse.json(errorBody("Cuerpo JSON inválido.", requestId), { status: 400, headers: rid });
   }
   if (!Array.isArray(reports)) {
