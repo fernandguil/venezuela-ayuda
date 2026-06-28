@@ -23,7 +23,7 @@ export default function CedulaSearchForm() {
 
       <form action={action} className="mt-4 space-y-3">
         <Honeypot />
-        <CedulaField error={state.fieldErrors?.cedula} />
+        <CedulaField error={state.fieldErrors?.cedula} mode="search" />
 
         {state.error && (
           <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700" role="alert">

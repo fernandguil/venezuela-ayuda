@@ -17,8 +17,15 @@ function detectPrefixFromPaste(raw: string): CedulaPrefix | null {
   return null;
 }
 
-export default function CedulaField({ error }: { error?: string }) {
+export default function CedulaField({
+  error,
+  mode = "save",
+}: {
+  error?: string;
+  mode?: "save" | "search";
+}) {
   const t = useTranslations("forms.checkin");
+  const tSearch = useTranslations("search.cedula");
   const [prefix, setPrefix] = useState<CedulaPrefix>("V");
   const [number, setNumber] = useState("");
 
@@ -73,7 +80,11 @@ export default function CedulaField({ error }: { error?: string }) {
 
       {preview && (
         <p className="mt-1.5 text-sm font-medium text-[#2563a8]">
-          {prefix === "V" ? t("cedulaPreviewV", { value: preview }) : t("cedulaPreviewE", { value: preview })}
+          {mode === "search"
+            ? tSearch("cedulaPreview", { value: preview })
+            : prefix === "V"
+              ? t("cedulaPreviewV", { value: preview })
+              : t("cedulaPreviewE", { value: preview })}
         </p>
       )}
 

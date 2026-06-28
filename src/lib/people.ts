@@ -158,7 +158,7 @@ export function mergePeople(
 
     const status = bucket
       .map((h) => h.status)
-      .reduce((a, b) => (STATUS_RANK[b] > STATUS_RANK[a] ? b : a), "LOOKING_FOR_SOMEONE" as CheckinStatus);
+      .reduce((a, b) => (STATUS_RANK[b] > STATUS_RANK[a] ? b : a));
 
     const locations: string[] = [];
     for (const h of bucket) {

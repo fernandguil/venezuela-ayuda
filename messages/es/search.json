@@ -32,6 +32,7 @@
   "cedula": {
     "heading": "Buscar por cédula",
     "intro": "Coincidencia exacta. El número no se muestra en los resultados.",
+    "cedulaPreview": "Se buscará como {value}.",
     "searchButton": "Buscar por cédula",
     "searching": "Buscando…",
     "none": "No encontramos un reporte con esa cédula."
