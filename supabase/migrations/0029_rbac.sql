@@ -88,7 +88,7 @@ insert into role_permissions (role_id, permission_id)
   select r.id, p.id
   from roles r, permissions p
   where
-    (r.name = 'admin'       and p.name in ('admin.access', 'center.manage'))
+    (r.name = 'admin'       and p.name in ('admin.access', 'center.manage', 'modupe.review'))
     or
     (r.name = 'super_admin' and p.name in ('admin.access', 'admin.super', 'center.manage', 'partner.manage', 'modupe.review'))
     or
