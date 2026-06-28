@@ -88,7 +88,7 @@ insert into role_permissions (role_id, permission_id)
   select r.id, p.id
   from roles r, permissions p
   where
-    (r.name = 'admin'       and p.name in ('admin.access', 'center.manage'))
+    (r.name = 'admin'       and p.name in ('admin.access', 'center.manage', 'modupe.review'))
     or
     (r.name = 'super_admin' and p.name in ('admin.access', 'admin.super', 'center.manage', 'partner.manage', 'modupe.review'))
     or
@@ -97,13 +97,13 @@ on conflict do nothing;
 
 -- ── Backfill: migrate admin_emails → user_roles ───────────────────────────────
 -- Existing super-admins get the super_admin role; regular admins get admin.
--- granted_by = 'migration/0029'; granted_at = their original created_at.
+-- granted_by = 'migration/202606280003'; granted_at = their original created_at.
 
 insert into user_roles (email, role_id, granted_by, granted_at)
   select
     ae.email,
     r.id,
-    'migration/0029',
+    'migration/202606280003',
     ae.created_at
   from admin_emails ae
   join roles r on r.name = case when ae.is_super_admin then 'super_admin' else 'admin' end
@@ -130,4 +130,4 @@ $$;
 revoke execute on function user_permissions(text) from public;
 grant  execute on function user_permissions(text) to service_role;
 
-insert into applied_migrations (version) values ('0029') on conflict do nothing;
+insert into applied_migrations (version) values ('202606280003') on conflict do nothing;
