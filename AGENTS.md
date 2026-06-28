@@ -151,6 +151,13 @@ was accidentally opened against `main`, rebase the feature branch onto
 `upstream/staging` before changing the PR base so unrelated `main`-only commits
 do not appear in the diff.
 
+When a PR touches frontend (UI, components, or anything visually observable),
+attach a short **GIF** of the feature working so reviewers can see the change
+without checking out the branch. In Claude Code, run `/verify` to drive the app
+and record the GIF. This is recommended (best-effort), not a hard gate: `/verify`
+runs locally and not every contributor uses Claude Code, so reviewers should not
+block solely on a missing GIF.
+
 Recommended branch names:
 
 ```text

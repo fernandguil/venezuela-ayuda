@@ -19,6 +19,8 @@
 ## Checklist
 
 - [ ] En local pasan `npm run lint`, `npm run build` y `node --test`.
+- [ ] **Si toca frontend (UI/componentes):** adjunto un **GIF** del feature
+  funcionando (recomendado). Con Claude Code: `/verify` lo graba por ti.
 - [ ] El PR es pequeño y enfocado (un solo cambio lógico).
 - [ ] No expongo PII (teléfonos/contactos) en logs ni en endpoints/vistas públicas.
 - [ ] No subo secretos (`.env*`, keys, tokens).
