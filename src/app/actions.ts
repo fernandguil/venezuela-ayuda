@@ -149,13 +149,16 @@ export async function submitCheckin(
     const supabase = getServerSupabase();
 
     if (cedulaHashVal) {
-      const { data: existing } = await supabase
+      const { data: existing, error: existingErr } = await supabase
         .from("checkins")
         .select("id")
         .eq("cedula_hash", cedulaHashVal)
         .eq("hidden", false)
         .limit(1)
         .maybeSingle();
+      if (existingErr) {
+        logWarn("cedula_duplicate_probe_failed", { scope: "actions.submitCheckin" }, existingErr);
+      }
       if (existing?.id) {
         return {
           ok: false,

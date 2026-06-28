@@ -20,7 +20,7 @@ function flattenKeys(obj, prefix = "") {
   }, {});
 }
 
-test("i18n namespace parity between 'es' and 'en'", async (t) => {
+test("i18n namespace parity between 'es' and 'en'", async () => {
   const esDir = path.join(MESSAGES_DIR, "es");
   const enDir = path.join(MESSAGES_DIR, "en");
 

@@ -141,7 +141,7 @@ async function fetchSheet() {
   const header = rows[0].map(norm);
   const col = (n) => header.findIndex((h) => h.includes(n));
   const iCity = col("ciudad"), iZone = col("zona"), iBuilding = col("edificio"),
-    iReport = col("reporte"), iVerif = col("verificacion"), iSource = col("cuenta"),
+    iReport = col("reporte"), iSource = col("cuenta"),
     iSearch = col("busqueda"), iNote = col("nota");
   if (iBuilding < 0) return [];
   const out = [];
