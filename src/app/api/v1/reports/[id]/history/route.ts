@@ -55,9 +55,10 @@ export async function GET(req: Request, { params }: Params) {
     return NextResponse.json({ error: SERVICE_UNAVAILABLE_MESSAGE }, { status: 503 });
   }
 
+  // La tabla se deriva POR EVENTO (event.resource_table) dentro de projectHistory:
+  // eventos de tablas no públicas se descartan. Si todo queda fuera, history vacío.
   const rows = (data ?? []) as AuditRow[];
-  const table = rows[0]?.resource_table ?? null;
-  const history = table ? projectHistory(rows, table) : [];
+  const history = projectHistory(rows);
 
   return NextResponse.json(
     { id, history },

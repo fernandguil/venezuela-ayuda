@@ -19,7 +19,12 @@ export const FORBIDDEN_FIELDS = [
   "risk_answers",
   "ip",
   "user_agent",
+  "verified_by", // email del admin verificador (PII interna)
+  "hidden", // moderación interna
+  "verified", // estado de verificación interno
 ];
+
+const FORBIDDEN_SET = new Set(FORBIDDEN_FIELDS);
 
 // Metadata estática del reporte: no se reporta como "cambio" (id no cambia; el
 // source ya va a nivel de evento; created_at/source_url no son ediciones útiles).
@@ -39,14 +44,23 @@ function eq(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-// Un evento crudo del audit_log → { action, occurred_at, source, changes }.
-// changes = { campoPúblico: { from, to } } solo para los que cambiaron. En CREATE
-// (before null) los campos presentes en `after` aparecen como cambio desde null.
-export function projectHistoryEvent(event, table) {
+// Un evento crudo del audit_log → { action, occurred_at, source, changes } o null.
+// La tabla se deriva del PROPIO evento (event.resource_table): si no es una de las
+// 4 tablas públicas (checkins/help_requests/help_offers/damaged_reports) el evento
+// se DESCARTA (null) — p.ej. collection_centers no se expone. changes = { campo:
+// { from, to } } solo para los campos públicos que cambiaron. En CREATE (before
+// null) los campos presentes en `after` aparecen como cambio desde null.
+export function projectHistoryEvent(event) {
+  const table = event.resource_table;
+  if (!(table in VIEW_FOR_TABLE)) return null;
   const before = event.before ?? null;
   const after = event.after ?? {};
   const changes = {};
   for (const f of publicFields(table)) {
+    // Defensa en profundidad: aunque publicFields ya excluye los FORBIDDEN (no
+    // están en VIEW_COLUMNS), filtramos explícito para que la garantía no dependa
+    // solo de la whitelist de la vista.
+    if (FORBIDDEN_SET.has(f)) continue;
     const from = before == null ? null : (before[f] ?? null);
     const to = after[f] ?? null;
     if (!eq(from, to)) changes[f] = { from, to };
@@ -59,7 +73,8 @@ export function projectHistoryEvent(event, table) {
   };
 }
 
-// Lista de eventos (orden preservado) → lista proyectada.
-export function projectHistory(events, table) {
-  return (events ?? []).map((e) => projectHistoryEvent(e, table));
+// Lista de eventos (orden preservado) → lista proyectada, descartando los nulos
+// (eventos de tablas no públicas).
+export function projectHistory(events) {
+  return (events ?? []).map(projectHistoryEvent).filter((e) => e !== null);
 }
